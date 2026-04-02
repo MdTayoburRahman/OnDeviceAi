@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">OnDeviceAi</string>
+    <string name="hint_prompt">Type your prompt</string>
+    <string name="btn_load_model">Load Model</string>
+    <string name="btn_generate">Generate</string>
+    <string name="btn_stop">Stop</string>
+    <string name="default_output">AI response will appear here.</string>
+</resources>

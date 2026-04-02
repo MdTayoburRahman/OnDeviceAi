@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/tvHeaderModels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Available Models"
+        android:textAppearance="?attr/textAppearanceHeadline6"
+        android:paddingBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnRefreshModels"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Refresh" />
+
+    <TextView
+        android:id="@+id/tvDownloadProgress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:paddingTop="8dp"
+        android:visibility="gone" />
+
+    <ProgressBar
+        android:id="@+id/progressDownload"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvEmptyModels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No models found. Place model files in the app's Models folder."
+        android:visibility="gone"
+        android:paddingTop="12dp" />
+
+    <ListView
+        android:id="@+id/lvModels"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:dividerHeight="1dp" />
+
+</LinearLayout>
+
