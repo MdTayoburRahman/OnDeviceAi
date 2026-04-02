@@ -9,6 +9,8 @@
 // detect number of hardware threads
 #include <thread>
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
 static const char *TAG = "llama_jni";
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -29,6 +31,98 @@ static std::mutex g_mutex;
 // If upstream API differs, adjust names accordingly.
 
 #include "llama.h"
+
+// Vulkan probe (optional; used to detect whether Vulkan compute is available
+// on the device and to report device name / memory). This probe only
+// enumerates devices and inspects properties; it does not create logical
+// devices or perform any GPU work.
+#include <vulkan/vulkan.h>
+
+static std::atomic<bool> g_vulkan_available(false);
+static std::string g_vulkan_device_name;
+static uint32_t g_vulkan_vendor_id = 0;
+static uint64_t g_vulkan_device_local_mem = 0; // bytes
+
+static ggml_backend_t g_vk_backend = nullptr;
+
+static bool try_init_vulkan() {
+    VkResult r;
+    VkInstance instance = VK_NULL_HANDLE;
+
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "OnDeviceAiProbe";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName = "ProbeEngine";
+    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+
+    r = vkCreateInstance(&createInfo, nullptr, &instance);
+    if (r != VK_SUCCESS || instance == VK_NULL_HANDLE) {
+        LOGI("[llama_jni] Vulkan instance creation failed (vkCreateInstance=%d)", (int) r);
+        return false;
+    }
+
+    uint32_t count = 0;
+    r = vkEnumeratePhysicalDevices(instance, &count, nullptr);
+    if (r != VK_SUCCESS || count == 0) {
+        LOGI("[llama_jni] No Vulkan physical devices found (vkEnumeratePhysicalDevices=%d)", (int) r);
+        vkDestroyInstance(instance, nullptr);
+        return false;
+    }
+
+    std::vector<VkPhysicalDevice> devices(count);
+    r = vkEnumeratePhysicalDevices(instance, &count, devices.data());
+    if (r != VK_SUCCESS) {
+        LOGI("[llama_jni] vkEnumeratePhysicalDevices failed second call=%d", (int) r);
+        vkDestroyInstance(instance, nullptr);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < count; ++i) {
+        VkPhysicalDevice dev = devices[i];
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(dev, &props);
+
+        VkPhysicalDeviceMemoryProperties memProps;
+        vkGetPhysicalDeviceMemoryProperties(dev, &memProps);
+
+        uint64_t deviceLocalBytes = 0;
+        for (uint32_t h = 0; h < memProps.memoryHeapCount; ++h) {
+            if (memProps.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                deviceLocalBytes += memProps.memoryHeaps[h].size;
+            }
+        }
+
+        uint32_t qCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(dev, &qCount, nullptr);
+        if (qCount == 0) continue;
+        std::vector<VkQueueFamilyProperties> qprops(qCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(dev, &qCount, qprops.data());
+        bool hasCompute = false;
+        for (uint32_t q = 0; q < qCount; ++q) {
+            if (qprops[q].queueFlags & VK_QUEUE_COMPUTE_BIT) { hasCompute = true; break; }
+        }
+        if (!hasCompute) continue;
+
+        g_vulkan_device_name = props.deviceName ? props.deviceName : "unknown";
+        g_vulkan_vendor_id = props.vendorID;
+        g_vulkan_device_local_mem = deviceLocalBytes;
+        g_vulkan_available.store(true);
+
+        LOGI("[llama_jni] Vulkan device selected: %s vendor=0x%08x local_mem=%llu bytes",
+             g_vulkan_device_name.c_str(), (unsigned int) g_vulkan_vendor_id, (unsigned long long) g_vulkan_device_local_mem);
+
+        break;
+    }
+
+    vkDestroyInstance(instance, nullptr);
+    return g_vulkan_available.load();
+}
 
 static struct llama_model * g_model = nullptr;
 static struct llama_context * g_ctx = nullptr;
@@ -83,7 +177,49 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     struct llama_model_params mparams = llama_model_default_params();
     // keep defaults; caller may tune mparams if needed
 
+    // Load dynamic ggml backends (Vulkan, Metal, CUDA, etc.) so llama.cpp can discover GPU devices
+    // This mirrors how upstream examples call ggml_backend_load_all() before loading models.
+    ggml_backend_load_all();
+
+    // If Vulkan probe succeeded, try to select a Vulkan GPU device and pass it via mparams.devices
+    // so the model loader will prefer GPU offload. We allocate a small array terminated by NULL.
+    ggml_backend_dev_t * devs_alloc = nullptr;
+    if (g_vulkan_available.load()) {
+        size_t dev_count = ggml_backend_dev_count();
+        ggml_backend_dev_t chosen = nullptr;
+        for (size_t i = 0; i < dev_count; ++i) {
+            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+            if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+                ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+                const char * regname = ggml_backend_reg_name(reg);
+                if (regname && strcmp(regname, "vulkan") == 0) {
+                    chosen = dev;
+                    break;
+                }
+            }
+        }
+        if (chosen) {
+            // allocate a small NULL-terminated array of devices
+            devs_alloc = (ggml_backend_dev_t *) malloc(sizeof(ggml_backend_dev_t) * 2);
+            if (devs_alloc) {
+                devs_alloc[0] = chosen;
+                devs_alloc[1] = nullptr;
+                mparams.devices = devs_alloc;
+                LOGI("[llama_jni] selected ggml Vulkan device for model load");
+            }
+        } else {
+            LOGI("[llama_jni] no ggml Vulkan GPU device found - model will select devices automatically");
+        }
+    }
+
     g_model = llama_model_load_from_file(path.c_str(), mparams);
+
+    // free temporary devices array if we allocated one - llama copies device handles internally
+    if (devs_alloc) {
+        free(devs_alloc);
+        devs_alloc = nullptr;
+        mparams.devices = nullptr;
+    }
     if (!g_model) {
         LOGE("[llama_jni] failed to load model file: %s", path.c_str());
         return JNI_FALSE;
@@ -123,6 +259,12 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
 
     // clear any previous stop request when loading a new model
     g_stop_requested.store(false);
+    // attempt to probe Vulkan availability for possible combined CPU+GPU usage
+    if (try_init_vulkan()) {
+        LOGI("[llama_jni] Vulkan is available on this device: %s", g_vulkan_device_name.c_str());
+    } else {
+        LOGI("[llama_jni] Vulkan not available or probe failed; continuing with CPU-only path");
+    }
     LOGI("[llama_jni] model and context initialized successfully");
     return JNI_TRUE;
 }
@@ -135,6 +277,68 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_interruptGeneration(
     // set the cooperative cancellation flag - generation loop will check this
     g_stop_requested.store(true);
     LOGI("[llama_jni] interruptGeneration called: stop requested");
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_isVulkanAvailable(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    return g_vulkan_available.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_initVulkanBackend(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    if (!g_vulkan_available.load()) return JNI_FALSE;
+    // ensure backends loaded
+    ggml_backend_load_all();
+
+    size_t dev_count = ggml_backend_dev_count();
+    ggml_backend_dev_t chosen = nullptr;
+    for (size_t i = 0; i < dev_count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+            ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+            const char * regname = ggml_backend_reg_name(reg);
+            if (regname && strcmp(regname, "vulkan") == 0) {
+                chosen = dev;
+                break;
+            }
+        }
+    }
+    if (!chosen) {
+        LOGI("[llama_jni] initVulkanBackend: no ggml Vulkan device found");
+        return JNI_FALSE;
+    }
+
+    // initialize backend for chosen device
+    g_vk_backend = ggml_backend_dev_init(chosen, nullptr);
+    if (!g_vk_backend) {
+        LOGE("[llama_jni] ggml_backend_dev_init failed for Vulkan device");
+        return JNI_FALSE;
+    }
+    LOGI("[llama_jni] ggml Vulkan backend initialized");
+    return JNI_TRUE;
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_getVulkanDeviceName(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    if (!g_vulkan_available.load()) return env->NewStringUTF("");
+    return env->NewStringUTF(g_vulkan_device_name.c_str());
+}
+
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_getVulkanDeviceLocalMemory(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    return (jlong) g_vulkan_device_local_mem;
 }
 
 extern "C"
@@ -162,21 +366,27 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         return env->NewStringUTF("No vocab available.");
     }
 
+    // Determine whether this is the first sequence (no tokens yet in memory)
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    llama_pos mem_pos_max = llama_memory_seq_pos_max(mem, 0);
+    bool is_first = (mem_pos_max == -1);
+
     // Tokenize prompt (text_len = input.size())
     const int max_prompt_tokens = 4096;
     std::vector<llama_token> prompt_tokens(max_prompt_tokens);
-    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(), prompt_tokens.data(), (int32_t) prompt_tokens.size(), true, false);
+    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(), prompt_tokens.data(), (int32_t) prompt_tokens.size(), is_first, false);
     if (n_prompt <= 0) {
         LOGE("[llama_jni] tokenization failed or returned %d", n_prompt);
         return env->NewStringUTF("Tokenization failed.");
     }
 
+    // base position to place the prompt tokens in the context memory. If this
+    // is the first message, start at 0; otherwise continue after the last
+    // position currently in memory for sequence 0.
+    llama_pos base_pos = is_first ? 0 : (mem_pos_max + 1);
+
     // Evaluate prompt using batch API
     // llama_batch_init allocates auxiliary arrays (pos, seq_id, n_seq_id, logits).
-    // The easiest and safest approach for a simple single-sequence prompt is
-    // to let the library auto-generate pos/seq metadata. To do that we free
-    // the auxiliary arrays allocated by llama_batch_init and set them to NULL
-    // so that llama_batch_allocr::init will auto-generate them.
     struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
     if (!batch.token) {
         LOGE("[llama_jni] failed to init batch for prompt");
@@ -191,14 +401,12 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     // tell the batch how many tokens we actually filled
     batch.n_tokens = n_prompt;
 
-    // initialize the per-token metadata that llama_batch_init preallocated
-    // instead of freeing internals. This is safer and does not rely on
-    // library-internal auto-generation.
-    // For a single-sequence prompt we set pos incrementally and mark each
-    // seq_id array to contain a single sequence id = 0.
+    // initialize the per-token metadata that llama_batch_init preallocated.
+    // For a single-sequence prompt we set pos incrementally starting from
+    // base_pos and mark each seq_id array to contain a single sequence id = 0.
     if (batch.pos) {
         for (int i = 0; i < n_prompt; ++i) {
-            batch.pos[i] = i;
+            batch.pos[i] = base_pos + i;
         }
     }
     if (batch.n_seq_id) {
@@ -303,7 +511,9 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         // so we don't depend on freeing internals. Set pos to the next token
         // index and mark a single seq_id = 0 for this new token.
         if (one.pos) {
-            one.pos[0] = n_prompt + t; // next position in the sequence
+            // position of the new token should follow the prompt tokens and any
+            // previously existing tokens in the context
+            one.pos[0] = base_pos + n_prompt + t; // next position in the sequence
         }
         if (one.n_seq_id) {
             one.n_seq_id[0] = 1;

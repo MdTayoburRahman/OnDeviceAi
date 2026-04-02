@@ -28,4 +28,20 @@ public class LlamaBridge {
     public native void interruptGeneration();
 
     public native void releaseModel();
+
+    // Vulkan probe getters (implemented in native code). May return empty/0 when Vulkan isn't available.
+    public native boolean isVulkanAvailable();
+    public native String getVulkanDeviceName();
+    public native long getVulkanDeviceLocalMemory();
+    public native boolean initVulkanBackend();
+
+    // Called from native code (via JNI) to append a line to the in-app runtime log.
+    // Native can call the static Java method com.droidrocks.ondeviceai.LlamaBridge.appendNativeLog(msg)
+    // using CallStaticVoidMethod or a generated JNI bridge.
+    public static void appendNativeLog(String msg) {
+        try {
+            RuntimeLog.append(msg == null ? "" : msg);
+        } catch (Throwable ignored) {
+        }
+    }
 }

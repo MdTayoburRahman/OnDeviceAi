@@ -18,7 +18,9 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.droidrocks.ondeviceai.Utils.CpuMonitor;
+import com.droidrocks.ondeviceai.Utils.GpuInfo;
 import com.droidrocks.ondeviceai.Utils.RamMonitor;
+import android.widget.ScrollView;
 
 import java.io.File;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +42,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvSysUsage;
     private TextView tvRamUsage;
 
+    private TextView tvGPU;
+    private TextView tvLog;
+    private ScrollView scrollLog;
+
     private LlamaBridge llamaBridge = null;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -54,12 +60,10 @@ public class MainActivity extends AppCompatActivity {
     private RamMonitor ramMonitor;
 
 
-
     // Temporary in-memory conversation history (keeps last N turns)
     private final java.util.Deque<String> convoHistory = new java.util.ArrayDeque<>();
     private static final int MAX_HISTORY_ENTRIES = 6; // tune as needed
     private static final int MAX_PROMPT_CHARS = 1024; // truncate combined prompt to this many chars (from the end)
-
     private volatile boolean isModelLoaded = false;
     private File modelFile;
     private boolean fastMode = false; // when true use greedy sampling for lower latency
@@ -67,7 +71,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean contextPrimed = false;
     // one-time system prompt to prime the model/context when first sending text
     private static final String SYSTEM_PROMPT = "<|system|>\nYou are a helpful assistant. Answer concisely.\n<|end|>\n";
- @Override
+    private GpuInfo gpuInfo;
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
@@ -86,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
         btnModels = findViewById(R.id.btnModels);
         tvRamUsage = findViewById(R.id.tvRamUsage);
         btnGenerate = findViewById(R.id.btnGenerate);
+        tvGPU = findViewById(R.id.tvGpuUsage);
         // find stop button if present in layout
         btnStop = findViewById(R.id.btnStop);
         if (btnStop == null) {
@@ -157,6 +164,59 @@ public class MainActivity extends AppCompatActivity {
         
         monitorCpu();
         monitorRAM();
+        monitorGPU();
+        // bind runtime log view for live AI/native logs
+        try {
+            scrollLog = findViewById(R.id.scrollLog);
+            tvLog = findViewById(R.id.tvLog);
+            if (tvLog != null && scrollLog != null) {
+                RuntimeLog.bind(tvLog, scrollLog);
+                RuntimeLog.append("Log pane initialized");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void monitorGPU() {
+        GpuInfo.Info info = GpuInfo.getGpuInfo();
+        StringBuilder sb = new StringBuilder();
+        if (info != null) {
+            sb.append("GL: ").append(info.renderer == null ? "<unknown>" : info.renderer);
+            sb.append(" (").append(info.vendor == null ? "vendor?" : info.vendor).append(")\n");
+            sb.append("GL ver: ").append(info.version == null ? "?" : info.version);
+            Log.i("MainActivity", "GPU vendor: " + info.vendor + " renderer: " + info.renderer + " version: " + info.version);
+        } else {
+            Log.w("MainActivity", "GPU detection failed");
+            sb.append("GPU info not available\n");
+        }
+
+        // If native library is present, probe the Vulkan/ggml info exposed by native JNI
+        try {
+            if (LlamaBridge.isNativeLoaded()) {
+                if (llamaBridge == null) llamaBridge = new LlamaBridge();
+                try {
+                    boolean vk = llamaBridge.isVulkanAvailable();
+                    sb.append("Vulkan: ").append(vk ? "available" : "not available");
+                    if (vk) {
+                        String dev = llamaBridge.getVulkanDeviceName();
+                        long mem = llamaBridge.getVulkanDeviceLocalMemory();
+                        sb.append("\nDevice: ").append(dev == null ? "<unknown>" : dev);
+                        sb.append("\nLocal memory: ").append(mem > 0 ? (mem / (1024 * 1024)) + " MB" : "unknown");
+                        Log.i(TAG, "Vulkan available on device: " + dev + " mem=" + mem);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Failed to query native Vulkan info", t);
+                    sb.append("\nVulkan probe failed");
+                }
+            } else {
+                sb.append("\nNative library not loaded");
+            }
+        } catch (Throwable ignored) {
+            // best-effort only
+        }
+
+        tvGPU.setText(sb.toString());
+
     }
 
     private void monitorRAM() {
@@ -186,6 +246,7 @@ public class MainActivity extends AppCompatActivity {
         setBusy(true);
         if (tvOutput != null) tvOutput.setText("Loading model...");
         Log.i(TAG, "loadModel: starting");
+        RuntimeLog.append("loadModel: starting");
 
         // If the model file is missing, send the user to the ModelListActivity
         if (modelFile == null || !modelFile.exists() || modelFile.length() == 0) {
@@ -212,14 +273,34 @@ public class MainActivity extends AppCompatActivity {
                     loaded = false;
                 } else {
                     Log.i(TAG, "Model file present; calling native loadModel: " + modelFile.getAbsolutePath());
+                    RuntimeLog.append("Model file present; loading: " + modelFile.getName());
                     if (LlamaBridge.isNativeLoaded()) {
                         if (llamaBridge == null) llamaBridge = new LlamaBridge();
                         try {
+                            // If Vulkan is available according to the native probe, try initializing the ggml Vulkan backend
+                            try {
+                                if (llamaBridge.isVulkanAvailable()) {
+                                    Log.i(TAG, "Native reports Vulkan available — initializing Vulkan backend");
+                                    RuntimeLog.append("Native reports Vulkan available — initVulkanBackend()");
+                                    boolean inited = llamaBridge.initVulkanBackend();
+                                    Log.i(TAG, "initVulkanBackend returned " + inited);
+                                    RuntimeLog.append("initVulkanBackend returned " + inited);
+                                } else {
+                                    Log.i(TAG, "Native reports Vulkan unavailable");
+                                    RuntimeLog.append("Vulkan not available");
+                                }
+                            } catch (Throwable t2) {
+                                Log.w(TAG, "Vulkan init probe failed", t2);
+                                RuntimeLog.append("Vulkan init probe failed: " + t2.getMessage());
+                            }
+
                             int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
                             loaded = llamaBridge.loadModel(modelFile.getAbsolutePath(), 1024, threads);
                             Log.i(TAG, "Native loadModel returned " + loaded);
+                            RuntimeLog.append("Native loadModel returned " + loaded);
                         } catch (Throwable t) {
                             Log.e(TAG, "Native loadModel failed", t);
+                            RuntimeLog.append("Native loadModel failed: " + t.getMessage());
                             loaded = false;
                         }
                     } else {
@@ -241,14 +322,17 @@ public class MainActivity extends AppCompatActivity {
                 if (result) {
                     if (tvOutput != null) tvOutput.setText("Model loaded successfully.");
                     toast("Model loaded");
+                    RuntimeLog.append("Model loaded successfully");
                 } else {
                     if (modelFile == null || !modelFile.exists() || modelFile.length() == 0) {
                         if (tvOutput != null)
                             tvOutput.setText("Model file not found. Place the model at:\n" + ModelUtils.getDefaultModelFile(MainActivity.this).getAbsolutePath());
                         toast("Model file not found");
+                        RuntimeLog.append("Model file not found in expected path");
                     } else {
                         if (tvOutput != null) tvOutput.setText("Failed to load model.");
                         toast("Load failed");
+                        RuntimeLog.append("Failed to load model");
                     }
                 }
             });
@@ -264,11 +348,6 @@ public class MainActivity extends AppCompatActivity {
         });
 
     }
-    
-
-
-
-    
 
     private void generateText() {
         String input = etPrompt.getText().toString().trim();
@@ -296,6 +375,7 @@ public class MainActivity extends AppCompatActivity {
             String result = "";
             try {
                 Log.i(TAG, "Calling native generate");
+                RuntimeLog.append("Calling native generate");
                 if (!LlamaBridge.isNativeLoaded()) {
                     throw new IllegalStateException("Native library not loaded");
                 }
@@ -325,6 +405,7 @@ public class MainActivity extends AppCompatActivity {
 
                 result = llamaBridge.generate(toSend, 200, fastMode ? 0.0f : 0.7f, fastMode ? 1.0f : 0.9f);
                 Log.i(TAG, "Native generate returned length=" + (result != null ? result.length() : 0));
+                RuntimeLog.append("Native generate returned length=" + (result != null ? result.length() : 0));
             } catch (Throwable t) {
                 result = "Error: " + t.getMessage();
                 Log.e(TAG, "Exception during generate", t);
@@ -361,6 +442,7 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 if (tvOutput != null) tvOutput.setText(cleaned);
+                RuntimeLog.append("Generation finished; output length=" + cleaned.length());
             });
         });
     }
@@ -382,10 +464,13 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             if (!generating) return;
             long elapsed = System.currentTimeMillis() - genStartMs;
-            long seconds = elapsed / 1000;
-            long tenths = (elapsed % 1000) / 100; // show tenths
-            if (tvGenTimer != null) tvGenTimer.setText(seconds + "." + tenths + " s");
-            mainHandler.postDelayed(this, 200);
+            long totalSeconds = elapsed / 1000;
+            long minutes = totalSeconds / 60;
+            long seconds = totalSeconds % 60;
+            String text = String.format("%02d:%02d", minutes, seconds);
+            if (tvGenTimer != null) tvGenTimer.setText(text);
+            // update twice a second
+            mainHandler.postDelayed(this, 500);
         }
     };
 
@@ -393,6 +478,7 @@ public class MainActivity extends AppCompatActivity {
         generating = true;
         genStartMs = System.currentTimeMillis();
         // start UI updates
+        if (tvGenTimer != null) tvGenTimer.setText("00:00");
         mainHandler.post(genTimerRunnable);
     }
 
@@ -455,6 +541,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         cpuMonitor.start();
         ramMonitor.start();
+
     }
 
     @Override
@@ -462,6 +549,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         cpuMonitor.stop();
         ramMonitor.stop();
+
     }
 
 

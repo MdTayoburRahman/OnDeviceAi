@@ -42,6 +42,11 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/llama.cpp/CMakeLists.txt")
     # vary depending on the version - check the llama.cpp CMake files and
     # replace 'llama' with the correct target if different.
     target_link_libraries(llama_jni PRIVATE llama)
+    # If Vulkan is available on the NDK/toolchain, enable ggml/vulkan support
+    # (this is a best-effort compile flag; upstream ggml/llama.cpp must support
+    # a Vulkan backend for this to have effect).
+    target_compile_definitions(llama_jni PRIVATE GGML_USE_VULKAN)
+    target_link_libraries(llama_jni PRIVATE vulkan)
 else()
     message(STATUS "llama.cpp not detected - building llama_jni with placeholder JNI implementation")
 endif()
