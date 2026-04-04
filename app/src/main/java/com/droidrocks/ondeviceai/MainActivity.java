@@ -536,7 +536,6 @@ public class MainActivity extends BaseActivity {
                 contextPrimed = false;
                 setBusy(false);
                 if (result) {
-                    toast("Model loaded");
                     RuntimeLog.append("Model loaded successfully");
                 } else {
                     if (modelFile == null || !modelFile.exists() || modelFile.length() == 0) {
@@ -635,11 +634,8 @@ public class MainActivity extends BaseActivity {
 
                 setBusy(false);
 
-                String cleaned = finalResult.replace('\u2581', ' ').replace("_", " ").replace("<0x0A>", "\n");
-
-                cleaned = cleaned.replaceAll("[ \t]{2,}", " ");
-                cleaned = cleaned.replaceAll("(\\n\\s*){2,}", "\\n\\n");
-                cleaned = cleaned.trim();
+                // Format the response nicely
+                String cleaned = formatAiResponse(finalResult);
 
                 try {
                     String historyEntry = formattedPrompt + cleaned + "\n";
@@ -781,8 +777,61 @@ public class MainActivity extends BaseActivity {
         super.onPause();
         cpuMonitor.stop();
         ramMonitor.stop();
-
     }
 
+    /**
+     * Format AI response for nice display
+     */
+    private String formatAiResponse(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
 
+        // Remove ALL special tokens and markers
+        String cleaned = text
+            // Remove role markers
+            .replace("<|user|>", "")
+            .replace("<|assistant|>", "")
+            .replace("<|system|>", "")
+            // Remove end tokens
+            .replace("<|end|>", "")
+            .replace("<|endoftext|>", "")
+            .replace("<|im_end|>", "")
+            .replace("<|im_start|>", "")
+            .replace("</s>", "")
+            // Replace space markers
+            .replace("Ġ", " ")        // Replace Ġ (sentencepiece space marker) with space
+            .replace('\u2581', ' ')  // Replace ▁ (sentence piece marker) with space
+            .replace("_", " ")        // Replace underscores with space
+            // Replace hex newlines
+            .replace("<0x0A>", "\n")
+            .replace("<br>", "\n")
+            .replace("<br/>", "\n");
+
+        // Fix multiple consecutive spaces
+        cleaned = cleaned.replaceAll("[ \t]{2,}", " ");  // Replace multiple spaces with single space
+
+        // Fix multiple consecutive newlines
+        cleaned = cleaned.replaceAll("\\n[ \t]+", "\n"); // Remove leading spaces on new lines
+        cleaned = cleaned.replaceAll("(\\n\\s*){3,}", "\n\n"); // Replace 3+ newlines with 2
+
+        // Clean up common formatting issues
+        cleaned = cleaned.replaceAll("([.!?])([A-Z])", "$1 $2"); // Space after punctuation before capital
+        cleaned = cleaned.replaceAll("([,;:])([^ ])", "$1 $2"); // Space after punctuation
+
+        // Remove extra quotes and clean them up
+        cleaned = cleaned.replaceAll("^[\"']+", "").replaceAll("[\"']+$", ""); // Remove quotes at start/end
+        cleaned = cleaned.replaceAll("``", "\"");    // Replace `` with "
+        cleaned = cleaned.replaceAll("''", "\"");    // Replace '' with "
+
+        // Final cleanup
+        cleaned = cleaned.trim();
+
+        // If result is empty after cleaning, return placeholder
+        if (cleaned.isEmpty()) {
+            return "(No response generated)";
+        }
+
+        return cleaned;
+    }
 }

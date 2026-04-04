@@ -1,4 +1,4 @@
-package com.droidrocks.ondeviceai.adapter;
+ package com.droidrocks.ondeviceai.adapter;
 
 import android.view.LayoutInflater;
 import android.view.View;
@@ -44,20 +44,20 @@ public class AvailableModelsAdapter extends RecyclerView.Adapter<AvailableModels
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         AvailableModel model = models.get(position);
 
+        // Set model name, size, and description separately
         holder.tvModelName.setText(model.getName());
-        holder.tvModelDescription.setText(model.getDescription() + " • " + model.getSize());
+        holder.tvModelSize.setText(model.getSize());
+        holder.tvModelDescription.setText(model.getDescription());
 
         // Show downloaded badge if already downloaded
         if (model.isDownloaded()) {
             holder.tvDownloaded.setVisibility(View.VISIBLE);
             holder.btnDownload.setEnabled(false);
-            holder.btnDownload.setText(R.string.already_downloaded);
             holder.btnDownload.setIconResource(R.drawable.ic_check_circle);
             holder.ivModelIcon.setImageResource(R.drawable.ic_check_circle);
         } else {
             holder.tvDownloaded.setVisibility(View.GONE);
             holder.btnDownload.setEnabled(true);
-            holder.btnDownload.setText(R.string.btn_download);
             holder.btnDownload.setIconResource(R.drawable.ic_download);
             holder.ivModelIcon.setImageResource(R.drawable.ic_cloud_download);
         }
@@ -100,6 +100,7 @@ public class AvailableModelsAdapter extends RecyclerView.Adapter<AvailableModels
 
     static class ViewHolder extends RecyclerView.ViewHolder {
         TextView tvModelName;
+        TextView tvModelSize;
         TextView tvModelDescription;
         TextView tvDownloaded;
         MaterialButton btnDownload;
@@ -108,6 +109,7 @@ public class AvailableModelsAdapter extends RecyclerView.Adapter<AvailableModels
         ViewHolder(@NonNull View itemView) {
             super(itemView);
             tvModelName = itemView.findViewById(R.id.tvModelName);
+            tvModelSize = itemView.findViewById(R.id.tvModelSize);
             tvModelDescription = itemView.findViewById(R.id.tvModelDescription);
             tvDownloaded = itemView.findViewById(R.id.tvDownloaded);
             btnDownload = itemView.findViewById(R.id.btnDownload);

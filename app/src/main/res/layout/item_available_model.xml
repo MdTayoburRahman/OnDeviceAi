@@ -3,8 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginHorizontal="16dp"
-    android:layout_marginVertical="6dp"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginVertical="4dp"
     app:cardCornerRadius="12dp"
     app:cardElevation="2dp"
     app:cardBackgroundColor="@color/card_background"
@@ -12,56 +12,85 @@
     android:focusable="true"
     android:foreground="?attr/selectableItemBackground">
 
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="16dp">
+        android:orientation="vertical"
+        android:padding="12dp">
 
-        <!-- Model icon -->
-        <ImageView
-            android:id="@+id/ivModelIcon"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:src="@drawable/ic_cloud_download"
-            android:padding="10dp"
-            android:background="@drawable/status_chip_background"
-            app:tint="@color/secondary"
-            android:contentDescription="@string/content_desc_model"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
-
-        <!-- Model name -->
-        <TextView
-            android:id="@+id/tvModelName"
-            android:layout_width="0dp"
+        <!-- Top Row: Model Name + Size Badge + Download Button -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="8dp"
-            android:textSize="16sp"
-            android:textColor="@color/on_surface"
-            android:textStyle="bold"
-            android:maxLines="2"
-            android:ellipsize="end"
-            app:layout_constraintEnd_toStartOf="@id/btnDownload"
-            app:layout_constraintStart_toEndOf="@id/ivModelIcon"
-            app:layout_constraintTop_toTopOf="parent" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <!-- Model description / size -->
+            <!-- Model Icon -->
+            <ImageView
+                android:id="@+id/ivModelIcon"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/ic_cloud_download"
+                android:padding="6dp"
+                android:background="@drawable/status_chip_background"
+                app:tint="@color/secondary"
+                android:contentDescription="@string/content_desc_model" />
+
+            <!-- Model Name -->
+            <TextView
+                android:id="@+id/tvModelName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="8dp"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <!-- Size Badge -->
+            <TextView
+                android:id="@+id/tvModelSize"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_tertiary_container"
+                android:background="@drawable/badge_downloaded"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Download button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDownload"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                app:icon="@drawable/ic_download"
+                app:iconSize="20dp"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:cornerRadius="22dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp" />
+
+        </LinearLayout>
+
+        <!-- Description Row -->
         <TextView
             android:id="@+id/tvModelDescription"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginEnd="8dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginStart="46dp"
             android:textSize="12sp"
             android:textColor="@color/on_surface_variant"
             android:maxLines="2"
-            android:ellipsize="end"
-            app:layout_constraintEnd_toStartOf="@id/btnDownload"
-            app:layout_constraintStart_toEndOf="@id/ivModelIcon"
-            app:layout_constraintTop_toBottomOf="@id/tvModelName" />
+            android:ellipsize="end" />
 
         <!-- Already downloaded badge -->
         <TextView
@@ -75,27 +104,10 @@
             android:paddingHorizontal="8dp"
             android:paddingVertical="2dp"
             android:layout_marginTop="6dp"
-            android:layout_marginStart="16dp"
-            android:visibility="gone"
-            app:layout_constraintStart_toEndOf="@id/ivModelIcon"
-            app:layout_constraintTop_toBottomOf="@id/tvModelDescription" />
+            android:layout_marginStart="46dp"
+            android:visibility="gone" />
 
-        <!-- Download button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnDownload"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            app:icon="@drawable/ic_download"
-            app:iconSize="18dp"
-            app:cornerRadius="20dp"
-            android:text="@string/btn_download"
-            android:textSize="12sp"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>
 

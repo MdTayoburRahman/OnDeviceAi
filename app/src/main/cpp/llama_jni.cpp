@@ -238,6 +238,10 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     ggml_backend_load_all();
     LOGI("[llama_jni] ggml backends loaded successfully");
 
+    // OPTIMIZATION: Enable layer-wise GPU offloading for better performance
+    // This allows llama.cpp to automatically offload compute layers to GPU
+    mparams.split_mode = LLAMA_SPLIT_MODE_LAYER;
+
     // If Vulkan probe succeeded, try to select a Vulkan GPU device and pass it via mparams.devices
     // so the model loader will prefer GPU offload. We allocate a small array terminated by NULL.
     ggml_backend_dev_t * devs_alloc = nullptr;
@@ -287,6 +291,15 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     struct llama_context_params cparams = llama_context_default_params();
     if (contextSize > 0) cparams.n_ctx = (uint32_t) contextSize;
 
+    // OPTIMIZATION: Cap context size for mobile performance
+    // Large contexts consume GPU/CPU memory and increase latency
+    const uint32_t MAX_CONTEXT_SIZE = 2048;  // Configurable based on device RAM
+    if (cparams.n_ctx > MAX_CONTEXT_SIZE) {
+        LOGI("[llama_jni] WARNING: Context size %d exceeds recommended max %d, capping to %d",
+             cparams.n_ctx, MAX_CONTEXT_SIZE, MAX_CONTEXT_SIZE);
+        cparams.n_ctx = MAX_CONTEXT_SIZE;
+    }
+
     // If the Java caller provided a positive thread count, use it. Otherwise
     // detect a reasonable default for the device.
     if ((int) threads > 0) {
@@ -299,8 +312,10 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
 
     cparams.n_threads = g_n_threads;
     cparams.n_threads_batch = g_n_threads;
-    cparams.n_batch = 512;
-    cparams.n_ubatch = 512;
+    // Optimize batch sizes for mobile - smaller batches reduce latency
+    // Fine-tune based on device: 256 for mid-range, 512 for flagship
+    cparams.n_batch = 256;    // Reduced for faster inference on mobile
+    cparams.n_ubatch = 256;   // Micro-batch size - smaller = lower latency
 
     LOGI("[llama_jni] Context params: n_ctx=%d, n_batch=%d, threads=%d",
          cparams.n_ctx, cparams.n_batch, cparams.n_threads);
@@ -425,9 +440,7 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     std::string input = promptChars ? promptChars : "";
     env->ReleaseStringUTFChars(prompt, promptChars);
 
-    LOGI("[llama_jni] === GENERATE START ===");
-    LOGI("[llama_jni] Prompt length: %zu chars", input.size());
-    LOGI("[llama_jni] Max tokens: %d, Temp: %.2f, Top-P: %.2f", (int) maxTokens, temperature, topP);
+    LOGI("[llama_jni] Generating tokens (max: %d)...", (int) maxTokens);
 
     // Get vocab
     const struct llama_vocab * vocab = llama_model_get_vocab(g_model);
@@ -449,10 +462,9 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         LOGE("[llama_jni] tokenization failed or returned %d", n_prompt);
         return env->NewStringUTF("Tokenization failed.");
     }
-    LOGI("[llama_jni] tokenized %d tokens", n_prompt);
 
     // base position to place the prompt tokens in the context memory
-    llama_pos base_pos = is_first ? 0 : (mem_pos_max + 1);
+    llama_pos base_pos = is_first ? 0 : mem_pos_max + 1;
 
     // Evaluate prompt using batch API
     struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
@@ -460,8 +472,6 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         LOGE("[llama_jni] failed to init batch for prompt");
         return env->NewStringUTF("Batch init failed.");
     }
-
-    // populate token ids and request logits only for the last token
     for (int i = 0; i < n_prompt; ++i) {
         batch.token[i]   = prompt_tokens[i];
         batch.logits[i]  = (i == n_prompt - 1) ? 1 : 0;
@@ -509,12 +519,15 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     // Build sampler chain (optimized order for speed)
     struct llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
     if (temperature <= 0.0f) {
-        // Greedy sampling - fastest
+        // Greedy sampling - fastest method (deterministic, no RNG)
         llama_sampler_chain_add(chain, llama_sampler_init_greedy());
     } else {
-        // Temperature + top-p sampling
+        // Temperature + advanced sampling for quality/speed balance
         if (topP < 1.0f) {
-            llama_sampler_chain_add(chain, llama_sampler_init_top_p(topP, 1));
+            // OPTIMIZATION: Use min-p instead of top-p for faster convergence
+            // Min-p filters tokens more aggressively = faster sampling
+            float min_p = 1.0f - topP;  // Convert top-p to min-p threshold
+            llama_sampler_chain_add(chain, llama_sampler_init_min_p(std::max(0.01f, min_p), 1));
         }
         llama_sampler_chain_add(chain, llama_sampler_init_temp(temperature));
         llama_sampler_chain_add(chain, llama_sampler_init_dist((uint32_t)time(nullptr)));
@@ -530,11 +543,12 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
 
     int tokens_generated = 0;
 
+    LOGI("[llama_jni] Starting token generation...");
+
     // Generation loop - optimized with minimal overhead
     for (int t = 0; t < maxTokens; ++t) {
-        // Check stop request less frequently (every 4 tokens) to reduce overhead
-        if ((t & 3) == 0 && g_stop_requested.load()) {
-            LOGI("[llama_jni] generation interrupted at token %d", t);
+        // Check stop request - inline check without logging overhead
+        if (g_stop_requested.load()) {
             break;
         }
 
@@ -543,11 +557,15 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
 
         // append token text
         const char * piece = llama_vocab_get_text(vocab, id);
-        if (piece) output += piece;
+        if (piece) {
+            output += piece;
+        }
         tokens_generated++;
 
         // check for end-of-generation
-        if (llama_vocab_is_eog(vocab, id)) break;
+        if (llama_vocab_is_eog(vocab, id)) {
+            break;
+        }
 
         // Reuse the pre-allocated batch
         one.token[0] = id;
@@ -574,12 +592,15 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     double total_ms = (t_end - t_start) / 1000.0;
     double tokens_per_sec = tokens_generated > 0 ? (tokens_generated * 1000.0 / gen_ms) : 0;
 
-    LOGI("[llama_jni] === GENERATE COMPLETE ===");
-    LOGI("[llama_jni] Tokens generated: %d", tokens_generated);
-    LOGI("[llama_jni] Prompt processing: %.0f ms", prompt_ms);
-    LOGI("[llama_jni] Token generation: %.0f ms", gen_ms);
-    LOGI("[llama_jni] Total time: %.0f ms", total_ms);
-    LOGI("[llama_jni] Speed: %.1f tokens/sec", tokens_per_sec);
+    LOGI("[llama_jni] Generated %d tokens in %.0f ms (%.1f tok/sec)", tokens_generated, gen_ms, tokens_per_sec);
+
+    // OPTIMIZATION: Performance diagnostics
+    if (tokens_per_sec < 2.0) {
+        LOGI("[llama_jni] WARNING: Low throughput detected (%.1f tok/sec). Recommendations:", tokens_per_sec);
+        LOGI("[llama_jni]   1. Use quantized model (Q4_0 or Q5_0) for 2-4x speedup");
+        LOGI("[llama_jni]   2. Reduce context window size");
+        LOGI("[llama_jni]   3. Check if GPU acceleration is available");
+    }
 
     return env->NewStringUTF(output.c_str());
 }

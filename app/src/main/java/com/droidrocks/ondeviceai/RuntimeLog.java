@@ -29,6 +29,9 @@ public class RuntimeLog {
     private static final String ICON_MODEL = "🧠";
     private static final String ICON_GPU = "🎮";
     private static final String ICON_TOKEN = "📝";
+    private static final String ICON_THINKING = "💭";
+    private static final String ICON_PROMPT = "📥";
+    private static final String ICON_RESPONSE = "📤";
 
     public static void bind(TextView textView, ScrollView scrollView) {
         tvRef = new WeakReference<>(textView);
@@ -91,22 +94,39 @@ public class RuntimeLog {
     private static String getLogIcon(String line) {
         String lower = line.toLowerCase();
 
+        // Check for specific emoji indicators first (already has the right icon)
+        if (line.contains("💭")) {
+            return ICON_THINKING;
+        }
+        if (line.contains("📥") || lower.contains("prompt:") || lower.contains("prompt (")) {
+            return ICON_PROMPT;
+        }
+        if (line.contains("📤") || lower.contains("response preview")) {
+            return ICON_RESPONSE;
+        }
+        if (line.contains("🏁")) {
+            return ICON_SUCCESS;
+        }
+        if (line.contains("⏹️")) {
+            return ICON_WARN;
+        }
+
         if (lower.contains("error") || lower.contains("failed") || lower.contains("could not")) {
             return ICON_ERROR;
         }
         if (lower.contains("warning") || lower.contains("warn")) {
             return ICON_WARN;
         }
-        if (lower.contains("success") || lower.contains("initialized") || lower.contains("loaded") || lower.contains("done:")) {
+        if (lower.contains("success") || lower.contains("initialized") || lower.contains("complete") || lower.contains("ready")) {
             return ICON_SUCCESS;
         }
-        if (lower.contains("tok/s") || lower.contains("prompt=") || lower.contains("gen=") || lower.contains("ms")) {
+        if (lower.contains("tok/s") || lower.contains("tokens/sec") || lower.contains(" ms") || lower.contains("speed:") || lower.contains("time:")) {
             return ICON_TIMING;
         }
-        if (lower.contains("vulkan") || lower.contains("gpu") || lower.contains("backend")) {
+        if (lower.contains("vulkan") || lower.contains("gpu") || lower.contains("backend") || lower.contains("vram")) {
             return ICON_GPU;
         }
-        if (lower.contains("model") || lower.contains("context") || lower.contains("loadmodel")) {
+        if (lower.contains("model") || lower.contains("context") || lower.contains("load")) {
             return ICON_MODEL;
         }
         if (lower.contains("token") || lower.contains("generate") || lower.contains("sample")) {

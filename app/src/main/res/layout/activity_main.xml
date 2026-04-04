@@ -76,24 +76,28 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
-            <!-- Chat history button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnHistory"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                app:icon="@drawable/ic_history"
-                app:iconTint="@color/on_primary_container"
-                android:contentDescription="@string/btn_chat_history" />
-            <!-- Clear chat button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnClearChat"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                app:icon="@drawable/ic_delete"
-                app:iconTint="@color/on_primary_container"
-                android:contentDescription="@string/btn_clear_chat" />
+             <!-- Chat history button -->
+             <com.google.android.material.button.MaterialButton
+                 android:id="@+id/btnHistory"
+                 style="@style/Widget.Material3.Button.IconButton"
+                 android:layout_width="48dp"
+                 android:layout_height="48dp"
+                 app:icon="@drawable/ic_history"
+                 app:iconSize="24dp"
+                 app:iconTint="@color/on_primary_container"
+                 android:contentDescription="@string/btn_chat_history"
+                 android:layout_marginEnd="4dp" />
+             <!-- Clear chat button -->
+             <com.google.android.material.button.MaterialButton
+                 android:id="@+id/btnClearChat"
+                 style="@style/Widget.Material3.Button.IconButton"
+                 android:layout_width="48dp"
+                 android:layout_height="48dp"
+                 app:icon="@drawable/ic_delete"
+                 app:iconSize="24dp"
+                 app:iconTint="@color/error"
+                 android:contentDescription="@string/btn_clear_chat"
+                 android:layout_marginEnd="4dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnModels"

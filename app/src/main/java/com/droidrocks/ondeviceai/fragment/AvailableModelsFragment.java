@@ -49,25 +49,68 @@ public class AvailableModelsFragment extends Fragment {
 
     private boolean isDownloading = false;
 
-    // Preset models available for download
+    // Preset models available for download - optimized for LOW and MEDIUM-END mobile devices
     private static final AvailableModel[] PRESET_MODELS = {
+        // === ULTRA-COMPACT (< 400 MB) - Best for low-end devices (2GB RAM) ===
+        new AvailableModel(
+            "SmolLM2 360M Instruct (Q8_0)",
+            "📱 PURPOSE: Budget phones • Quick responses • Basic Q&A",
+            "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf?download=true",
+            "~380 MB"
+        ),
+        new AvailableModel(
+            "Qwen2.5 0.5B Instruct (Q4_K_M)",
+            "📱 PURPOSE: Low-end devices • Fast inference • Simple tasks",
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true",
+            "~400 MB"
+        ),
+
+        // === COMPACT (400-600 MB) - Great for low-end to entry-level mid-range ===
+        new AvailableModel(
+            "Qwen2.5 0.5B Instruct (Q8_0)",
+            "💬 PURPOSE: Better quality • Low RAM usage • Longer responses",
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf?download=true",
+            "~530 MB"
+        ),
+        new AvailableModel(
+            "TinyLlama 1.1B Chat (Q2_K)",
+            "💬 PURPOSE: Ultra-fast chat • Conversational • Minimal footprint",
+            "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q2_K.gguf?download=true",
+            "~480 MB"
+        ),
+
+        // === SMALL (600 MB - 1 GB) - For mid-range devices (4-6GB RAM) ===
         new AvailableModel(
             "TinyLlama 1.1B Chat (Q4_K_M)",
-            "Compact, fast chat model",
+            "🎯 PURPOSE: Balanced quality • Mid-range phones • Better understanding",
             "https://huggingface.co/hieupt/TinyLlama-1.1B-Chat-v1.0-Q4_K_M-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0-q4_k_m.gguf?download=true",
             "~670 MB"
         ),
         new AvailableModel(
-            "TinyLlama 1.1B Chat (Q2_K)",
-            "Smaller, ultra-fast chat model",
-            "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q2_K.gguf?download=true",
-            "~480 MB"
+            "Qwen2.5 1.5B Instruct (Q4_K_M)",
+            "🚀 PURPOSE: Instructions & tasks • Writing content • Complex reasoning",
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true",
+            "~1.0 GB"
+        ),
+
+        // === MEDIUM (1-1.6 GB) - For better mid-range devices (6GB+ RAM) ===
+        new AvailableModel(
+            "Llama 3.2 1B Instruct (Q4_K_M)",
+            "⭐ PURPOSE: Latest model • Better accuracy • Mid-range devices",
+            "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf?download=true",
+            "~800 MB"
         ),
         new AvailableModel(
-            "Gemma 3 1B Instruct (Q2_K)",
-            "Google's efficient instruction model",
-            "https://huggingface.co/lm-kit/gemma-3-1b-instruct-gguf/resolve/main/gemma-3-it-1B-Q2_K.gguf?download=true",
-            "~520 MB"
+            "Gemma 2 2B Instruct (Q4_K_M)",
+            "🎓 PURPOSE: Quality responses • Better reasoning • Knowledge tasks",
+            "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf?download=true",
+            "~1.6 GB"
+        ),
+        new AvailableModel(
+            "Llama 3.2 3B Instruct (Q2_K)",
+            "💪 PURPOSE: Powerful responses • Complex tasks • Compressed for mobile",
+            "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q2_K.gguf?download=true",
+            "~1.2 GB"
         )
     };
 
