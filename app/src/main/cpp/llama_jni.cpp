@@ -771,8 +771,11 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
             piece_buf[piece_len] = '\0';
             output.append(piece_buf, piece_len);
 
-            // Log every streamed token for diagnostics
-            LOGI("[llama_jni] token[%d]: \"%s\" (id=%d)", t, piece_buf, (int)id);
+            // Log streamed tokens (first few + periodic) without heavy JNI/RuntimeLog overhead
+            if (t < 3 || t % 25 == 0) {
+                __android_log_print(ANDROID_LOG_INFO, TAG,
+                    "[llama_jni] token[%d]: \"%s\" (id=%d)", t, piece_buf, (int)id);
+            }
 
             // Stream token to Java callback
             if (onTokenMethod) {

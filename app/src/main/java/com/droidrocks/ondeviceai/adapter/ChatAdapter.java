@@ -97,16 +97,19 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     /**
      * Update the content of the last AI message in-place (used for streaming tokens).
+     * Searches backwards for the last non-user message to handle any ordering edge cases.
      * Uses a payload so RecyclerView skips the default cross-fade animation.
      * Must be called on the UI thread.
      */
     public void updateLastMessage(String newContent) {
-        if (messages.isEmpty()) return;
-        int lastIdx = messages.size() - 1;
-        ChatMessage last = messages.get(lastIdx);
-        if (!last.isUser()) {
-            last.setContent(newContent);
-            notifyItemChanged(lastIdx, "streaming");
+        // Search backwards for the last AI (non-user) message
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage msg = messages.get(i);
+            if (!msg.isUser()) {
+                msg.setContent(newContent);
+                notifyItemChanged(i, "streaming");
+                return;
+            }
         }
     }
 

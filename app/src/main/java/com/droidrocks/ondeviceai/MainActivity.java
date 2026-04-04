@@ -371,10 +371,14 @@ private void setupChatRecyclerView() {
 
     private void addMessageToChat(String content, boolean isUser) {
         ChatMessage message = new ChatMessage(content, isUser, currentSessionId);
+        // Add to adapter IMMEDIATELY so the message appears in the UI right away.
+        // This also guarantees correct ordering: the user message is always in the
+        // adapter BEFORE the AI placeholder that the streaming code will post later.
+        chatAdapter.addMessage(message);
+        scrollToBottom();
+        // Persist to database asynchronously (ID will be set when the write completes)
         chatRepository.insertMessage(message, messageId -> {
             message.setId(messageId);
-            chatAdapter.addMessage(message);
-            scrollToBottom();
         });
     }
 
