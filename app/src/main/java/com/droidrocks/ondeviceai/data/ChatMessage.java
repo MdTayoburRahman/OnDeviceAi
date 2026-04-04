@@ -1,6 +1,7 @@
 package com.droidrocks.ondeviceai.data;
 
 import androidx.room.Entity;
+import androidx.room.Ignore;
 import androidx.room.PrimaryKey;
 
 /**
@@ -17,10 +18,13 @@ public class ChatMessage {
     private long timestamp;
     private String sessionId; // to group messages by conversation session
 
+    // No-arg constructor for Room
     public ChatMessage() {
         this.timestamp = System.currentTimeMillis();
     }
 
+    // Constructor for app use - ignored by Room
+    @Ignore
     public ChatMessage(String content, boolean isUser, String sessionId) {
         this.content = content;
         this.isUser = isUser;

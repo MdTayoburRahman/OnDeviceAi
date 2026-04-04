@@ -615,7 +615,9 @@ public class MainActivity extends BaseActivity {
                     toSend = formattedPrompt;
                 }
 
-                result = llamaBridge.generate(toSend, 200, fastMode ? 0.0f : 0.7f, fastMode ? 1.0f : 0.9f);
+                // Use lower temperature (0.4) and higher top_p (0.95) for faster, more coherent output
+                // Lower temp = less randomness = faster sampling
+                result = llamaBridge.generate(toSend, 150, fastMode ? 0.0f : 0.4f, fastMode ? 1.0f : 0.95f);
                 Log.i(TAG, "Native generate returned length=" + (result != null ? result.length() : 0));
                 RuntimeLog.append("Native generate returned length=" + (result != null ? result.length() : 0));
             } catch (Throwable t) {

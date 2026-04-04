@@ -167,7 +167,7 @@ static bool try_init_vulkan() {
         }
         if (!hasCompute) continue;
 
-        g_vulkan_device_name = props.deviceName ? props.deviceName : "unknown";
+        g_vulkan_device_name = props.deviceName;
         g_vulkan_vendor_id = props.vendorID;
         g_vulkan_device_local_mem = deviceLocalBytes;
         g_vulkan_available.store(true);
@@ -192,16 +192,13 @@ static std::atomic<bool> g_stop_requested(false);
 // Strategy:
 //  - use std::thread::hardware_concurrency() when available
 //  - if the reported count is zero, fall back to 1
-//  - prefer leaving one core free (use hw_concurrency - 1) when possible
-//  - clamp to a small upper bound to avoid extreme oversubscription on
-//    devices with many logical cores
+//  - use all available cores for maximum performance on mobile
 static int detect_default_n_threads() {
     unsigned int hw = std::thread::hardware_concurrency();
-    if (hw == 0) hw = 1;
-    unsigned int pick = hw > 1 ? std::max(1u, hw - 1) : 1u;
-    // Cap to avoid too many threads on mobile devices; tune as needed.
+    if (hw == 0) hw = 4; // reasonable default if detection fails
+    // Use all cores for mobile - they need maximum performance
     const unsigned int MAX_THREADS = 8;
-    if (pick > MAX_THREADS) pick = MAX_THREADS;
+    unsigned int pick = std::min(hw, MAX_THREADS);
     return (int) pick;
 }
 
@@ -219,10 +216,12 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     std::string path = pathChars ? pathChars : "";
     env->ReleaseStringUTFChars(modelPath, pathChars);
 
-    LOGI("[llama_jni] loadModel called path=%s contextSize=%d threads=%d", path.c_str(), (int) contextSize, (int) threads);
+    LOGI("[llama_jni] === LOAD MODEL START ===");
+    LOGI("[llama_jni] Model path: %s", path.c_str());
+    LOGI("[llama_jni] Context size: %d, Threads: %d", (int) contextSize, (int) threads);
 
     if (g_ctx) {
-        LOGI("[llama_jni] model already loaded, releasing previous instance");
+        LOGI("[llama_jni] Releasing previous model instance...");
         llama_free(g_ctx);
         g_ctx = nullptr;
     }
@@ -233,11 +232,11 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
 
     // prepare model params
     struct llama_model_params mparams = llama_model_default_params();
-    // keep defaults; caller may tune mparams if needed
+    LOGI("[llama_jni] Loading ggml backends...");
 
     // Load dynamic ggml backends (Vulkan, Metal, CUDA, etc.) so llama.cpp can discover GPU devices
-    // This mirrors how upstream examples call ggml_backend_load_all() before loading models.
     ggml_backend_load_all();
+    LOGI("[llama_jni] ggml backends loaded successfully");
 
     // If Vulkan probe succeeded, try to select a Vulkan GPU device and pass it via mparams.devices
     // so the model loader will prefer GPU offload. We allocate a small array terminated by NULL.
@@ -279,51 +278,62 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
         mparams.devices = nullptr;
     }
     if (!g_model) {
-        LOGE("[llama_jni] failed to load model file: %s", path.c_str());
+        LOGE("[llama_jni] ERROR: Failed to load model file!");
+        LOGE("[llama_jni] Path: %s", path.c_str());
         return JNI_FALSE;
     }
+    LOGI("[llama_jni] Model file loaded successfully");
 
     struct llama_context_params cparams = llama_context_default_params();
     if (contextSize > 0) cparams.n_ctx = (uint32_t) contextSize;
+
     // If the Java caller provided a positive thread count, use it. Otherwise
     // detect a reasonable default for the device.
     if ((int) threads > 0) {
         g_n_threads = (int) threads;
+        LOGI("[llama_jni] Using requested thread count: %d", g_n_threads);
     } else {
         g_n_threads = detect_default_n_threads();
-        LOGI("[llama_jni] auto-detected thread count = %d (hardware_concurrency=%u)", g_n_threads, std::thread::hardware_concurrency());
+        LOGI("[llama_jni] Auto-detected thread count: %d (CPU cores: %u)", g_n_threads, std::thread::hardware_concurrency());
     }
 
     cparams.n_threads = g_n_threads;
-    // Allow more threads for batch/prompt processing inside the context
-    // This value is advisory; the runtime may cap it depending on available resources
-    cparams.n_threads_batch = (int32_t) std::max(1, g_n_threads * 2);
+    cparams.n_threads_batch = g_n_threads;
+    cparams.n_batch = 512;
+    cparams.n_ubatch = 512;
 
+    LOGI("[llama_jni] Context params: n_ctx=%d, n_batch=%d, threads=%d",
+         cparams.n_ctx, cparams.n_batch, cparams.n_threads);
+
+    LOGI("[llama_jni] Initializing context from model...");
     g_ctx = llama_init_from_model(g_model, cparams);
     if (!g_ctx) {
-        LOGE("[llama_jni] failed to initialize context from model: %s", path.c_str());
+        LOGE("[llama_jni] ERROR: Failed to initialize context!");
         llama_model_free(g_model);
         g_model = nullptr;
         return JNI_FALSE;
     }
+    LOGI("[llama_jni] Context initialized successfully");
 
-    // set number of threads for runtime (if supported)
-    // give more threads for batch/prompt processing (tunable)
-    llama_set_n_threads(g_ctx, g_n_threads, g_n_threads * 4);
+    // set number of threads for runtime
+    llama_set_n_threads(g_ctx, g_n_threads, g_n_threads);
 
-    // optionally enable warmup: this pre-activates tensors which may improve
-    // per-token generation time after an initial warmup overhead
+    // enable warmup for better performance
     llama_set_warmup(g_ctx, true);
 
-    // clear any previous stop request when loading a new model
+    // clear any previous stop request
     g_stop_requested.store(false);
-    // attempt to probe Vulkan availability for possible combined CPU+GPU usage
+
+    // probe Vulkan availability
+    LOGI("[llama_jni] Probing Vulkan GPU availability...");
     if (try_init_vulkan()) {
-        LOGI("[llama_jni] Vulkan is available on this device: %s", g_vulkan_device_name.c_str());
+        LOGI("[llama_jni] Vulkan GPU available: %s", g_vulkan_device_name.c_str());
+        LOGI("[llama_jni] Vulkan VRAM: %llu MB", (unsigned long long)(g_vulkan_device_local_mem / (1024 * 1024)));
     } else {
-        LOGI("[llama_jni] Vulkan not available or probe failed; continuing with CPU-only path");
+        LOGI("[llama_jni] Vulkan not available, using CPU-only mode");
     }
-    LOGI("[llama_jni] model and context initialized successfully");
+
+    LOGI("[llama_jni] === MODEL READY ===");
     return JNI_TRUE;
 }
 
@@ -415,7 +425,9 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     std::string input = promptChars ? promptChars : "";
     env->ReleaseStringUTFChars(prompt, promptChars);
 
-    LOGI("[llama_jni] generate called prompt='%s' maxTokens=%d temp=%f topP=%f", input.c_str(), (int) maxTokens, temperature, topP);
+    LOGI("[llama_jni] === GENERATE START ===");
+    LOGI("[llama_jni] Prompt length: %zu chars", input.size());
+    LOGI("[llama_jni] Max tokens: %d, Temp: %.2f, Top-P: %.2f", (int) maxTokens, temperature, topP);
 
     // Get vocab
     const struct llama_vocab * vocab = llama_model_get_vocab(g_model);
@@ -429,7 +441,7 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     llama_pos mem_pos_max = llama_memory_seq_pos_max(mem, 0);
     bool is_first = (mem_pos_max == -1);
 
-    // Tokenize prompt (text_len = input.size())
+    // Tokenize prompt
     const int max_prompt_tokens = 4096;
     std::vector<llama_token> prompt_tokens(max_prompt_tokens);
     int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(), prompt_tokens.data(), (int32_t) prompt_tokens.size(), is_first, false);
@@ -437,14 +449,12 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         LOGE("[llama_jni] tokenization failed or returned %d", n_prompt);
         return env->NewStringUTF("Tokenization failed.");
     }
+    LOGI("[llama_jni] tokenized %d tokens", n_prompt);
 
-    // base position to place the prompt tokens in the context memory. If this
-    // is the first message, start at 0; otherwise continue after the last
-    // position currently in memory for sequence 0.
+    // base position to place the prompt tokens in the context memory
     llama_pos base_pos = is_first ? 0 : (mem_pos_max + 1);
 
     // Evaluate prompt using batch API
-    // llama_batch_init allocates auxiliary arrays (pos, seq_id, n_seq_id, logits).
     struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
     if (!batch.token) {
         LOGE("[llama_jni] failed to init batch for prompt");
@@ -456,12 +466,9 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
         batch.token[i]   = prompt_tokens[i];
         batch.logits[i]  = (i == n_prompt - 1) ? 1 : 0;
     }
-    // tell the batch how many tokens we actually filled
     batch.n_tokens = n_prompt;
 
-    // initialize the per-token metadata that llama_batch_init preallocated.
-    // For a single-sequence prompt we set pos incrementally starting from
-    // base_pos and mark each seq_id array to contain a single sequence id = 0.
+    // initialize the per-token metadata
     if (batch.pos) {
         for (int i = 0; i < n_prompt; ++i) {
             batch.pos[i] = base_pos + i;
@@ -469,141 +476,111 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     }
     if (batch.n_seq_id) {
         for (int i = 0; i < n_prompt; ++i) {
-            batch.n_seq_id[i] = 1; // one seq id for this simple single-sequence input
+            batch.n_seq_id[i] = 1;
         }
     }
     if (batch.seq_id) {
         for (int i = 0; i < n_prompt; ++i) {
             if (batch.seq_id[i]) {
-                // n_seq_max was set to 1 at init time, so we can safely set index 0
                 batch.seq_id[i][0] = 0;
             }
         }
     }
 
     if (g_stop_requested.load()) {
-        LOGI("[llama_jni] generation interrupted before prompt decode");
         llama_batch_free(batch);
         return env->NewStringUTF("[Generation cancelled]");
     }
-    int64_t t_decode_start = llama_time_us();
+
+    int64_t t_start = llama_time_us();
     int32_t res = llama_decode(g_ctx, batch);
-    int64_t t_decode_end = llama_time_us();
-    LOGI("[llama_jni] prompt decode time = %lld ms", (long long) ((t_decode_end - t_decode_start) / 1000));
+    int64_t t_prompt_done = llama_time_us();
     llama_batch_free(batch);
+
     if (res != 0) {
-        // Log detailed info to help debugging
         LOGE("[llama_jni] llama_decode returned %d", res);
-        // Interpret common return codes
-        if (res == 1) LOGE("[llama_jni] decode result: could not find a KV slot for the batch (try reducing batch size or increase context)");
-        else if (res == 2) LOGE("[llama_jni] decode result: aborted during processing");
-        else if (res == -1) LOGE("[llama_jni] decode result: invalid input batch");
-        else if (res < -1) LOGE("[llama_jni] decode result: fatal error (code=%d)", res);
-
-        // Dump some context/mode statistics
-        if (g_ctx) {
-            LOGI("[llama_jni] ctx stats: n_ctx=%u n_ctx_seq=%u n_batch=%u n_threads=%d", llama_n_ctx(g_ctx), llama_n_ctx_seq(g_ctx), llama_n_batch(g_ctx), llama_n_threads(g_ctx));
-            const struct llama_model * m = llama_get_model(g_ctx);
-            if (m) {
-                LOGI("[llama_jni] model stats: n_embd=%d n_layer=%d n_head=%d", llama_model_n_embd(m), llama_model_n_layer(m), llama_model_n_head(m));
-            }
-        }
-
+        if (res == 1) LOGE("[llama_jni] could not find KV slot (try reducing context)");
         return env->NewStringUTF("Evaluation failed.");
     }
 
     std::string output;
+    output.reserve(maxTokens * 8); // pre-allocate for speed
 
-    // Build sampler chain
+    // Build sampler chain (optimized order for speed)
     struct llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    // Add samplers according to temperature/topP
-    if (temperature <= 0.0f && topP >= 1.0f) {
+    if (temperature <= 0.0f) {
+        // Greedy sampling - fastest
         llama_sampler_chain_add(chain, llama_sampler_init_greedy());
     } else {
+        // Temperature + top-p sampling
         if (topP < 1.0f) {
             llama_sampler_chain_add(chain, llama_sampler_init_top_p(topP, 1));
         }
-        if (temperature > 0.0f) {
-            llama_sampler_chain_add(chain, llama_sampler_init_temp(temperature));
-        }
-        // final sampler to pick from distribution
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(temperature));
         llama_sampler_chain_add(chain, llama_sampler_init_dist((uint32_t)time(nullptr)));
     }
 
-    // generation loop: sample from logits produced by last decode, then decode the sampled token
+    // Pre-allocate single token batch outside loop for reuse
+    struct llama_batch one = llama_batch_init(1, 0, 1);
+    if (!one.token) {
+        llama_sampler_free(chain);
+        LOGE("[llama_jni] failed to init single-token batch");
+        return env->NewStringUTF("Batch init failed.");
+    }
+
+    int tokens_generated = 0;
+
+    // Generation loop - optimized with minimal overhead
     for (int t = 0; t < maxTokens; ++t) {
-        if (g_stop_requested.load()) {
+        // Check stop request less frequently (every 4 tokens) to reduce overhead
+        if ((t & 3) == 0 && g_stop_requested.load()) {
             LOGI("[llama_jni] generation interrupted at token %d", t);
-            break; // exit generation loop and return partial output
-        }
-        int64_t t_sample_start = llama_time_us();
-        llama_token id = llama_sampler_sample(chain, g_ctx, -1);
-        int64_t t_sample_end = llama_time_us();
-        LOGI("[llama_jni] sample time for token %d = %lld ms", t, (long long) ((t_sample_end - t_sample_start) / 1000));
-        if (id == LLAMA_TOKEN_NULL) {
-            LOGI("[llama_jni] sampler returned NULL token, finishing");
             break;
         }
+
+        llama_token id = llama_sampler_sample(chain, g_ctx, -1);
+        if (id == LLAMA_TOKEN_NULL) break;
 
         // append token text
         const char * piece = llama_vocab_get_text(vocab, id);
         if (piece) output += piece;
+        tokens_generated++;
 
-        // if token is EOS/EOT stop
-        if (llama_vocab_is_eog(vocab, id)) {
-            LOGI("[llama_jni] end-of-generation token received");
-            break;
-        }
+        // check for end-of-generation
+        if (llama_vocab_is_eog(vocab, id)) break;
 
-        // evaluate the chosen token to advance state
-        struct llama_batch one = llama_batch_init(1, 0, 1);
-        if (!one.token) {
-            LOGE("[llama_jni] failed to init batch for token");
-            break;
-        }
+        // Reuse the pre-allocated batch
         one.token[0] = id;
-        one.logits[0] = 1; // request logits for this token (needed for sampling)
+        one.logits[0] = 1;
         one.n_tokens = 1;
+        if (one.pos) one.pos[0] = base_pos + n_prompt + t;
+        if (one.n_seq_id) one.n_seq_id[0] = 1;
+        if (one.seq_id && one.seq_id[0]) one.seq_id[0][0] = 0;
 
-        // initialize per-token metadata that llama_batch_init preallocated
-        // so we don't depend on freeing internals. Set pos to the next token
-        // index and mark a single seq_id = 0 for this new token.
-        if (one.pos) {
-            // position of the new token should follow the prompt tokens and any
-            // previously existing tokens in the context
-            one.pos[0] = base_pos + n_prompt + t; // next position in the sequence
-        }
-        if (one.n_seq_id) {
-            one.n_seq_id[0] = 1;
-        }
-        if (one.seq_id && one.seq_id[0]) {
-            one.seq_id[0][0] = 0;
-        }
-
-        if (g_stop_requested.load()) {
-            LOGI("[llama_jni] generation interrupted before token decode %d", t);
-            llama_batch_free(one);
-            break;
-        }
-        int64_t t_decode_start_token = llama_time_us();
         int32_t r = llama_decode(g_ctx, one);
-        int64_t t_decode_end_token = llama_time_us();
-        LOGI("[llama_jni] decode time for token %d = %lld ms", t, (long long) ((t_decode_end_token - t_decode_start_token) / 1000));
-        llama_batch_free(one);
         if (r != 0) {
-            LOGE("[llama_jni] decode failed during generation step %d: %d", t, r);
+            LOGE("[llama_jni] decode failed at step %d: %d", t, r);
             break;
         }
     }
 
+    llama_batch_free(one);
     llama_sampler_free(chain);
-
-    // clear stop flag so subsequent calls are not auto-cancelled
     g_stop_requested.store(false);
 
-    LOGI("[llama_jni] generation completed, output length=%zu", output.size());
-    // Log a truncated preview of the output to help debugging (cap at 256 chars)
-    { size_t cap = 256; std::string preview = output.size() > cap ? output.substr(0, cap) + "..." : output; LOGI("[llama_jni] output preview: %s", preview.c_str()); }
+    int64_t t_end = llama_time_us();
+    double prompt_ms = (t_prompt_done - t_start) / 1000.0;
+    double gen_ms = (t_end - t_prompt_done) / 1000.0;
+    double total_ms = (t_end - t_start) / 1000.0;
+    double tokens_per_sec = tokens_generated > 0 ? (tokens_generated * 1000.0 / gen_ms) : 0;
+
+    LOGI("[llama_jni] === GENERATE COMPLETE ===");
+    LOGI("[llama_jni] Tokens generated: %d", tokens_generated);
+    LOGI("[llama_jni] Prompt processing: %.0f ms", prompt_ms);
+    LOGI("[llama_jni] Token generation: %.0f ms", gen_ms);
+    LOGI("[llama_jni] Total time: %.0f ms", total_ms);
+    LOGI("[llama_jni] Speed: %.1f tokens/sec", tokens_per_sec);
+
     return env->NewStringUTF(output.c_str());
 }
 
