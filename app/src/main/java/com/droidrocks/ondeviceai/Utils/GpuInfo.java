@@ -13,9 +13,9 @@ public final class GpuInfo {
     private static final String TAG = "GpuInfo";
 
     public static class Info {
-        public final String vendor;
-        public final String renderer;
-        public final String version;
+        private final String vendor;
+        private final String renderer;
+        private final String version;
 
         public Info(String vendor, String renderer, String version) {
             this.vendor = vendor;
@@ -23,6 +23,81 @@ public final class GpuInfo {
             this.version = version;
         }
 
+        /** GPU vendor (e.g., "Qualcomm", "ARM", "Imagination Technologies") */
+        public String getVendor() {
+            return vendor;
+        }
+
+        /** GPU renderer/model name (e.g., "Adreno (TM) 730", "Mali-G78") */
+        public String getRenderer() {
+            return renderer;
+        }
+
+        /** OpenGL ES version string */
+        public String getVersion() {
+            return version;
+        }
+
+        /** Short GPU name suitable for display */
+        public String getShortName() {
+            if (renderer != null && !renderer.isEmpty() && !renderer.equals("unknown")) {
+                // Clean up common patterns like "(TM)" or extra spaces
+                return renderer.replace("(TM)", "").replace("(R)", "").trim();
+            }
+            if (vendor != null && !vendor.isEmpty() && !vendor.equals("unknown")) {
+                return vendor;
+            }
+            return "Unknown GPU";
+        }
+
+        /** Get clean vendor name */
+        public String getCleanVendor() {
+            if (vendor == null || vendor.isEmpty() || vendor.equals("unknown")) {
+                return "Unknown";
+            }
+            // Shorten common vendor names
+            if (vendor.toLowerCase().contains("qualcomm")) return "Qualcomm";
+            if (vendor.toLowerCase().contains("arm")) return "ARM";
+            if (vendor.toLowerCase().contains("imagination")) return "PowerVR";
+            if (vendor.toLowerCase().contains("nvidia")) return "NVIDIA";
+            if (vendor.toLowerCase().contains("mali")) return "ARM Mali";
+            return vendor;
+        }
+
+        /** Get OpenGL ES version number only */
+        public String getGLVersionShort() {
+            if (version == null || version.isEmpty() || version.equals("unknown")) {
+                return "N/A";
+            }
+            // Extract version number (e.g., "OpenGL ES 3.2" -> "ES 3.2")
+            if (version.contains("OpenGL ES")) {
+                return version.replace("OpenGL ", "");
+            }
+            return version;
+        }
+
+        /** Short chip display for status bar */
+        public String toChipString() {
+            return getShortName();
+        }
+
+        /** Nice formatted display with icon-friendly layout */
+        public String toNiceString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("🎮 ").append(getShortName());
+            String cleanVendor = getCleanVendor();
+            if (!cleanVendor.equals("Unknown")) {
+                sb.append(" (").append(cleanVendor).append(")");
+            }
+            return sb.toString();
+        }
+
+        /** Full single-line display */
+        public String toDisplayString() {
+            return renderer + " (" + vendor + ")";
+        }
+
+        /** Multi-line detailed display */
         @Override
         public String toString() {
             return "GPU vendor=" + vendor + "\nrenderer=" + renderer + "\nversion=" + version;

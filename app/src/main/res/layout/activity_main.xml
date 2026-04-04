@@ -139,8 +139,8 @@
                 android:layout_marginEnd="8dp">
 
                 <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
                     android:src="@drawable/ic_timer"
                     android:contentDescription="@string/content_desc_timer" />
 
@@ -148,13 +148,13 @@
                     android:id="@+id/tvGenTimer"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
+                    android:layout_marginStart="4dp"
                     android:text="@string/status_timer_default"
-                    android:textSize="8sp"
+                    android:textSize="10sp"
                     android:textColor="@color/on_surface_variant" />
             </LinearLayout>
 
-            <!-- RAM Chip -->
+            <!-- CPU Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -164,32 +164,8 @@
                 android:layout_marginEnd="8dp">
 
                 <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:src="@drawable/ic_memory"
-                    android:contentDescription="@string/content_desc_ram" />
-
-                <TextView
-                    android:id="@+id/tvRamUsage"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:text="@string/status_ram_default"
-                    android:textSize="8sp"
-                    android:textColor="@color/on_surface_variant" />
-            </LinearLayout>
-
-            <!-- CPU/System Chip -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/status_chip_background"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
                     android:src="@drawable/ic_cpu"
                     android:contentDescription="@string/content_desc_cpu" />
 
@@ -197,9 +173,133 @@
                     android:id="@+id/tvSysUsage"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
+                    android:layout_marginStart="4dp"
                     android:text="@string/status_cpu_default"
-                    android:textSize="8sp"
+                    android:textSize="10sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- App RAM Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📱"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvAppRam"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="App: --"
+                    android:textSize="10sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- Device RAM Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="💾"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvDeviceRam"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="Device: --"
+                    android:textSize="10sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- Available RAM Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✨"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvAvailableRam"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="Free: --"
+                    android:textSize="10sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- GPU Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎮"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvGpuChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="GPU: --"
+                    android:textSize="10sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- Vulkan Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⚡"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvVulkanChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="Vulkan: --"
+                    android:textSize="10sp"
                     android:textColor="@color/on_surface_variant" />
             </LinearLayout>
         </LinearLayout>
@@ -217,20 +317,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/statusScrollView">
 
-        <!-- GPU Usage Banner (optional) -->
-        <TextView
-            android:id="@+id/tvGpuUsage"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/status_chip_background"
-            android:padding="8dp"
-            android:textSize="11sp"
-            android:textColor="@color/on_surface_variant"
-            android:drawablePadding="8dp"
-            android:visibility="gone"
-            android:maxLines="2"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginBottom="8dp" />
 
         <!-- Chat History RecyclerView -->
         <androidx.recyclerview.widget.RecyclerView

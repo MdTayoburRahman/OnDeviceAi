@@ -7,9 +7,7 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
-import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -24,7 +22,7 @@ import com.google.android.material.floatingactionbutton.ExtendedFloatingActionBu
 
 import java.util.List;
 
-public class ChatHistoryActivity extends AppCompatActivity {
+public class ChatHistoryActivity extends BaseActivity {
 
     public static final String EXTRA_SESSION_ID = "session_id";
     public static final String EXTRA_NEW_CHAT = "new_chat";
@@ -39,7 +37,6 @@ public class ChatHistoryActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
         setContentView(R.layout.activity_chat_history);
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.headerSection).getRootView(), (v, insets) -> {

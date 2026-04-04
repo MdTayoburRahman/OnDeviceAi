@@ -11,9 +11,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -34,7 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends BaseActivity {
 
     private static final String TAG = "MainActivity";
     private static final int REQUEST_MODEL_LIST = 1001;
@@ -51,9 +49,16 @@ public class MainActivity extends AppCompatActivity {
     private Button btnHistory;
     private TextView tvGenTimer;
     private TextView tvSysUsage;
-    private TextView tvRamUsage;
 
-    private TextView tvGPU;
+    // Separate RAM chips
+    private TextView tvAppRam;
+    private TextView tvDeviceRam;
+    private TextView tvAvailableRam;
+
+    // GPU chips
+    private TextView tvGpuChip;
+    private TextView tvVulkanChip;
+
     private TextView tvLog;
     private ScrollView scrollLog;
     
@@ -93,8 +98,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
 
         // Handle window insets for both system bars and IME (keyboard)
         View mainView = findViewById(R.id.main);
@@ -129,11 +134,18 @@ public class MainActivity extends AppCompatActivity {
         tvGenTimer = findViewById(R.id.tvGenTimer);
         tvSysUsage = findViewById(R.id.tvSysUsage);
         btnModels = findViewById(R.id.btnModels);
-        tvRamUsage = findViewById(R.id.tvRamUsage);
         btnGenerate = findViewById(R.id.btnGenerate);
-        tvGPU = findViewById(R.id.tvGpuUsage);
         btnClearChat = findViewById(R.id.btnClearChat);
         btnHistory = findViewById(R.id.btnHistory);
+
+        // RAM chips
+        tvAppRam = findViewById(R.id.tvAppRam);
+        tvDeviceRam = findViewById(R.id.tvDeviceRam);
+        tvAvailableRam = findViewById(R.id.tvAvailableRam);
+
+        // GPU chips
+        tvGpuChip = findViewById(R.id.tvGpuChip);
+        tvVulkanChip = findViewById(R.id.tvVulkanChip);
 
         // Setup chat RecyclerView
         rvChat = findViewById(R.id.rvChat);
@@ -216,9 +228,12 @@ public class MainActivity extends AppCompatActivity {
             btnHistory.setOnClickListener(v -> openChatHistory());
         }
 
-        // If a model was found earlier, attempt to load it
+        // If a model was found earlier, attempt to load it; otherwise redirect to download
         if (modelFile != null) {
             loadModel();
+        } else {
+            // No model available - redirect to ModelListActivity to download one
+            redirectToModelDownload();
         }
         
         monitorCpu();
@@ -357,52 +372,68 @@ public class MainActivity extends AppCompatActivity {
 
     private void monitorGPU() {
         GpuInfo.Info info = GpuInfo.getGpuInfo();
-        StringBuilder sb = new StringBuilder();
+
+        // GPU Chip
         if (info != null) {
-            sb.append("GL: ").append(info.renderer == null ? "<unknown>" : info.renderer);
-            sb.append(" (").append(info.vendor == null ? "vendor?" : info.vendor).append(")\n");
-            sb.append("GL ver: ").append(info.version == null ? "?" : info.version);
-            Log.i("MainActivity", "GPU vendor: " + info.vendor + " renderer: " + info.renderer + " version: " + info.version);
+            String gpuText = info.getShortName();
+            String vendor = info.getCleanVendor();
+            if (!vendor.equals("Unknown")) {
+                gpuText += " (" + vendor + ")";
+            }
+            tvGpuChip.setText(gpuText);
+            Log.i("MainActivity", "GPU vendor: " + info.getVendor() + " renderer: " + info.getRenderer() + " version: " + info.getVersion());
         } else {
             Log.w("MainActivity", "GPU detection failed");
-            sb.append("GPU info not available\n");
+            tvGpuChip.setText("Not detected");
         }
 
-        // If native library is present, probe the Vulkan/ggml info exposed by native JNI
+        // Vulkan Chip
         try {
             if (LlamaBridge.isNativeLoaded()) {
                 if (llamaBridge == null) llamaBridge = new LlamaBridge();
                 try {
                     boolean vk = llamaBridge.isVulkanAvailable();
-                    sb.append("Vulkan: ").append(vk ? "available" : "not available");
+                    StringBuilder vkText = new StringBuilder();
+                    vkText.append(vk ? "✓ " : "✗ ");
                     if (vk) {
-                        String dev = llamaBridge.getVulkanDeviceName();
                         long mem = llamaBridge.getVulkanDeviceLocalMemory();
-                        sb.append("\nDevice: ").append(dev == null ? "<unknown>" : dev);
-                        sb.append("\nLocal memory: ").append(mem > 0 ? (mem / (1024 * 1024)) + " MB" : "unknown");
+                        if (mem > 0) {
+                            long memMB = mem / (1024 * 1024);
+                            if (memMB >= 1024) {
+                                vkText.append(String.format(java.util.Locale.US, "%.1fGB", memMB / 1024.0));
+                            } else {
+                                vkText.append(memMB).append("MB");
+                            }
+                        } else {
+                            vkText.append("Yes");
+                        }
+                        String dev = llamaBridge.getVulkanDeviceName();
                         Log.i(TAG, "Vulkan available on device: " + dev + " mem=" + mem);
+                    } else {
+                        vkText.append("No");
                     }
+                    tvVulkanChip.setText(vkText.toString());
                 } catch (Throwable t) {
                     Log.w(TAG, "Failed to query native Vulkan info", t);
-                    sb.append("\nVulkan probe failed");
+                    tvVulkanChip.setText("⚠ Error");
                 }
             } else {
-                sb.append("\nNative library not loaded");
+                tvVulkanChip.setText("⏳ Loading");
             }
         } catch (Throwable ignored) {
-            // best-effort only
+            tvVulkanChip.setText("N/A");
         }
-
-        tvGPU.setText(sb.toString());
-
     }
 
     private void monitorRAM() {
-       ramMonitor =  new RamMonitor(this, 1000, new RamMonitor.OnRamUpdateListener() {
-            @Override
-            public void onUpdate(RamMonitor.RamInfo info) {
-                tvRamUsage.setText(info.toDisplayString());
-            }
+        ramMonitor = new RamMonitor(this, 1000, info -> {
+            // Update each RAM chip separately
+            tvAppRam.setText(String.format(java.util.Locale.US, "%dMB/%dMB",
+                    info.getAppUsedRamMB(), info.getAppMaxHeapMB()));
+            tvDeviceRam.setText(String.format(java.util.Locale.US, "%dMB/%dMB",
+                    info.getDeviceUsedRamMB(), info.getDeviceTotalRamMB()));
+            tvAvailableRam.setText(String.format(java.util.Locale.US, "%dMB",
+                    info.getDeviceAvailableRamMB()));
         });
     }
 
@@ -520,12 +551,10 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void monitorCpu(){
-        cpuMonitor = new CpuMonitor(1000, new CpuMonitor.OnCpuUpdateListener() {
-            @Override
-            public void onUpdate(CpuMonitor.CpuInfo info) {
-                tvSysUsage.setText(info.toDisplayString());
-            }
+    private void monitorCpu() {
+        cpuMonitor = new CpuMonitor(1000, info -> {
+            // Compact display: "8 cores | 12.5%"
+            tvSysUsage.setText(info.toChipString());
         });
 
     }
@@ -705,6 +734,21 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
+
+    /**
+     * Redirect user to ModelListActivity to download a model
+     */
+    private void redirectToModelDownload() {
+        mainHandler.postDelayed(() -> {
+            toast("No model found. Please download a model to get started.");
+            try {
+                startActivityForResult(new Intent(MainActivity.this, ModelListActivity.class), REQUEST_MODEL_LIST);
+            } catch (Exception ex) {
+                Log.e(TAG, "Failed to launch ModelListActivity for download", ex);
+            }
+        }, 500); // Small delay to let the UI load first
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -727,8 +771,8 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         cpuMonitor.start();
         ramMonitor.start();
-
     }
+
 
     @Override
     protected void onPause() {

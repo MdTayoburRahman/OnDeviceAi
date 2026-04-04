@@ -25,9 +25,11 @@
     <string name="content_desc_cpu">CPU Usage</string>
     <string name="content_desc_log">Log Terminal</string>
     <string name="content_desc_chat">Chat</string>
+    <string name="content_desc_model">Model</string>
     <string name="chat_cleared">Chat history cleared</string>
     <string name="confirm_clear_chat">Clear all chat history?</string>
     <string name="yes">Yes</string>
+    <string name="no">No</string>
 
     <!-- Chat History -->
     <string name="chat_history_title">Chat History</string>
@@ -42,5 +44,24 @@
     <string name="confirm_clear_all_history">Delete all chat history? This cannot be undone.</string>
     <string name="session_deleted">Conversation deleted</string>
     <string name="all_history_deleted">All history deleted</string>
-    <string name="no">No</string>
+
+    <!-- Models -->
+    <string name="models_title">Models</string>
+    <string name="tab_downloaded">Downloaded</string>
+    <string name="tab_available">Available</string>
+    <string name="no_models_downloaded">No models downloaded</string>
+    <string name="no_models_downloaded_desc">Download a model from the Available tab to get started</string>
+    <string name="btn_download">Download</string>
+    <string name="downloading_model">Downloading model…</string>
+    <string name="download_complete">Download complete</string>
+    <string name="download_failed">Download failed</string>
+    <string name="already_downloaded">Downloaded</string>
+    <string name="selected">Selected</string>
+    <string name="confirm_download">Download this model?</string>
+    <string name="model_size">Size: %s</string>
+    <string name="model_already_exists">Model already downloaded</string>
+    <string name="btn_delete_model">Delete model</string>
+    <string name="confirm_delete_model">Delete this model?</string>
+    <string name="confirm_delete_model_desc">This will permanently delete the model file from your device.</string>
+    <string name="model_deleted">Model deleted</string>
 </resources>

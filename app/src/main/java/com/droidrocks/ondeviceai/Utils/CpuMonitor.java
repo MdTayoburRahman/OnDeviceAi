@@ -6,8 +6,6 @@ import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.Locale;
 
 public class CpuMonitor {
@@ -17,19 +15,39 @@ public class CpuMonitor {
     }
 
     public static class CpuInfo {
-        public final int cpuCores;
-        public final String appCpuUsageText;
+        private final int cpuCores;
+        private final double appCpuPercent;
+        private final String appCpuUsageText;
 
-
-        public CpuInfo(int cpuCores, String appCpuUsageText) {
+        public CpuInfo(int cpuCores, double appCpuPercent, String appCpuUsageText) {
             this.cpuCores = cpuCores;
+            this.appCpuPercent = appCpuPercent;
             this.appCpuUsageText = appCpuUsageText;
-
         }
 
+        /** Number of CPU cores available */
+        public int getCpuCores() {
+            return cpuCores;
+        }
+
+        /** App CPU usage as percentage (0-100) */
+        public double getAppCpuPercent() {
+            return appCpuPercent;
+        }
+
+        /** App CPU usage as formatted text (e.g., "12.34%") */
+        public String getAppCpuUsageText() {
+            return appCpuUsageText;
+        }
+
+        /** Short display for status chip */
+        public String toChipString() {
+            return cpuCores + " cores | " + appCpuUsageText;
+        }
+
+        /** Full display string */
         public String toDisplayString() {
-            return "Cores: " + cpuCores +
-                    " || App CPU : " + appCpuUsageText ;
+            return "Cores: " + cpuCores + " | App CPU: " + appCpuUsageText;
         }
     }
 
@@ -70,7 +88,8 @@ public class CpuMonitor {
         if (listener != null) {
             listener.onUpdate(new CpuInfo(
                     Runtime.getRuntime().availableProcessors(),
-                    "Calculating..."
+                    0.0,
+                    "..."
             ));
         }
 
@@ -91,27 +110,21 @@ public class CpuMonitor {
         long appCpuDiffMs = currentAppCpuTimeMs - lastAppCpuTimeMs;
         long wallDiffMs = currentWallTimeMs - lastWallTimeMs;
 
-        String appCpuText = "0.00%";
+        double appCpuPercent = 0.0;
+        String appCpuText = "0.0%";
 
         if (wallDiffMs > 0 && cpuCores > 0) {
-            double appCpuPercent = (appCpuDiffMs * 100.0) / (wallDiffMs * cpuCores);
+            appCpuPercent = (appCpuDiffMs * 100.0) / (wallDiffMs * cpuCores);
 
             if (appCpuPercent < 0) appCpuPercent = 0;
             if (appCpuPercent > 100) appCpuPercent = 100;
 
-            appCpuText = String.format(Locale.US, "%.2f%%", appCpuPercent);
+            appCpuText = String.format(Locale.US, "%.1f%%", appCpuPercent);
         }
 
         lastAppCpuTimeMs = currentAppCpuTimeMs;
         lastWallTimeMs = currentWallTimeMs;
 
-        return new CpuInfo(
-                cpuCores,
-                appCpuText
-        );
-    }
-
-    private String getFormattedTime() {
-        return new SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(new Date());
+        return new CpuInfo(cpuCores, appCpuPercent, appCpuText);
     }
 }

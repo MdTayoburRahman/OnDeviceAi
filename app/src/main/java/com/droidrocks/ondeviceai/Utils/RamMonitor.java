@@ -5,6 +5,8 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
+import java.util.Locale;
+
 public class RamMonitor {
 
     public interface OnRamUpdateListener {
@@ -12,13 +14,12 @@ public class RamMonitor {
     }
 
     public static class RamInfo {
-        public final long appUsedRamMB;
-        public final long appMaxHeapMB;
-        public final long appFreeHeapMB;
-
-        public final long deviceTotalRamMB;
-        public final long deviceAvailableRamMB;
-        public final long deviceUsedRamMB;
+        private final long appUsedRamMB;
+        private final long appMaxHeapMB;
+        private final long appFreeHeapMB;
+        private final long deviceTotalRamMB;
+        private final long deviceAvailableRamMB;
+        private final long deviceUsedRamMB;
 
         public RamInfo(long appUsedRamMB,
                        long appMaxHeapMB,
@@ -34,10 +35,91 @@ public class RamMonitor {
             this.deviceUsedRamMB = deviceUsedRamMB;
         }
 
+        /** App's currently used RAM in MB */
+        public long getAppUsedRamMB() {
+            return appUsedRamMB;
+        }
+
+        /** App's maximum heap size in MB */
+        public long getAppMaxHeapMB() {
+            return appMaxHeapMB;
+        }
+
+        /** App's free heap in MB */
+        public long getAppFreeHeapMB() {
+            return appFreeHeapMB;
+        }
+
+        /** Device total RAM in MB */
+        public long getDeviceTotalRamMB() {
+            return deviceTotalRamMB;
+        }
+
+        /** Device available RAM in MB */
+        public long getDeviceAvailableRamMB() {
+            return deviceAvailableRamMB;
+        }
+
+        /** Device used RAM in MB */
+        public long getDeviceUsedRamMB() {
+            return deviceUsedRamMB;
+        }
+
+        /** Device RAM usage as percentage (0-100) */
+        public double getDeviceUsagePercent() {
+            if (deviceTotalRamMB <= 0) return 0;
+            return (deviceUsedRamMB * 100.0) / deviceTotalRamMB;
+        }
+
+        /** App heap usage as percentage (0-100) */
+        public double getAppHeapUsagePercent() {
+            if (appMaxHeapMB <= 0) return 0;
+            return (appUsedRamMB * 100.0) / appMaxHeapMB;
+        }
+
+        /** Short display for status chip - shows app usage and device available */
+        public String toChipString() {
+            return String.format(Locale.US, "App: %dMB | Free: %dMB",
+                    appUsedRamMB, deviceAvailableRamMB);
+        }
+
+        /** Compact chip string - just app usage */
+        public String toAppChipString() {
+            return appUsedRamMB + "MB";
+        }
+
+        /** Compact chip string - device info */
+        public String toDeviceChipString() {
+            return String.format(Locale.US, "%d/%dMB",
+                    deviceUsedRamMB, deviceTotalRamMB);
+        }
+
+        /** Full display string with all RAM info */
         public String toDisplayString() {
+            return "App: " + appUsedRamMB + "MB" +
+                    " | Device: " + deviceUsedRamMB + "/" + deviceTotalRamMB + "MB" +
+                    " | Free: " + deviceAvailableRamMB + "MB";
+        }
+
+        /** Nice formatted multi-line display with emojis */
+        public String toNiceString() {
+            double devicePercent = getDeviceUsagePercent();
+            double appPercent = getAppHeapUsagePercent();
+            
+            return String.format(Locale.US, 
+                    "📱 App: %dMB / %dMB (%.0f%%)\n" +
+                    "💾 Device: %dMB / %dMB (%.0f%%)\n" +
+                    "✨ Available: %dMB",
+                    appUsedRamMB, appMaxHeapMB, appPercent,
+                    deviceUsedRamMB, deviceTotalRamMB, devicePercent,
+                    deviceAvailableRamMB);
+        }
+
+        /** Detailed multi-line display */
+        public String toDetailedString() {
             return "App Used RAM: " + appUsedRamMB + " MB" +
-                   // "\nApp Max Heap: " + appMaxHeapMB + " MB" +
-                 //   "\nApp Free Heap: " + appFreeHeapMB + " MB" +
+                    "\nApp Max Heap: " + appMaxHeapMB + " MB" +
+                    "\nApp Free Heap: " + appFreeHeapMB + " MB" +
                     "\nDevice RAM: " + deviceTotalRamMB + " MB" +
                     "\nAvailable RAM: " + deviceAvailableRamMB + " MB" +
                     "\nUsed RAM: " + deviceUsedRamMB + " MB";
