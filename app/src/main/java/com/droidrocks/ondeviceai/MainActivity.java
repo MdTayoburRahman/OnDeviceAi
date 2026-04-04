@@ -1,5 +1,6 @@
 package com.droidrocks.ondeviceai;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -7,22 +8,28 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.droidrocks.ondeviceai.Utils.CpuMonitor;
 import com.droidrocks.ondeviceai.Utils.GpuInfo;
 import com.droidrocks.ondeviceai.Utils.RamMonitor;
+import com.droidrocks.ondeviceai.adapter.ChatAdapter;
+import com.droidrocks.ondeviceai.data.ChatMessage;
+import com.droidrocks.ondeviceai.data.ChatRepository;
 import android.widget.ScrollView;
 
 import java.io.File;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -30,14 +37,18 @@ import java.util.concurrent.Future;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_MODEL_LIST = 1001;
+    private static final int REQUEST_CHAT_HISTORY = 1002;
 
     private EditText etPrompt;
     private TextView tvOutput;
     private TextView tvModelPath;
-    private ProgressBar progressBar;
+
     private Button btnGenerate;
     private Button btnStop;
     private Button btnModels;
+    private Button btnClearChat;
+    private Button btnHistory;
     private TextView tvGenTimer;
     private TextView tvSysUsage;
     private TextView tvRamUsage;
@@ -45,6 +56,12 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvGPU;
     private TextView tvLog;
     private ScrollView scrollLog;
+    
+    // Chat UI components
+    private RecyclerView rvChat;
+    private ChatAdapter chatAdapter;
+    private ChatRepository chatRepository;
+    private String currentSessionId;
 
     private LlamaBridge llamaBridge = null;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -78,11 +95,33 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+
+        // Handle window insets for both system bars and IME (keyboard)
+        View mainView = findViewById(R.id.main);
+        View inputContainer = findViewById(R.id.inputContainer);
+
+        ViewCompat.setOnApplyWindowInsetsListener(mainView, (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+
+            // Apply top padding for status bar
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, 0);
+
+            // Apply bottom padding/margin for keyboard - use the larger of system bars or IME
+            int bottomInset = Math.max(systemBars.bottom, ime.bottom);
+            inputContainer.setPadding(
+                inputContainer.getPaddingLeft(),
+                inputContainer.getPaddingTop(),
+                inputContainer.getPaddingRight(),
+                bottomInset > 0 ? bottomInset : (int) (12 * getResources().getDisplayMetrics().density)
+            );
+
             return insets;
         });
+
+        // Initialize chat repository and session
+        chatRepository = new ChatRepository(this);
+        currentSessionId = UUID.randomUUID().toString();
 
         etPrompt = findViewById(R.id.etPrompt);
         tvOutput = findViewById(R.id.tvOutput);
@@ -93,6 +132,16 @@ public class MainActivity extends AppCompatActivity {
         tvRamUsage = findViewById(R.id.tvRamUsage);
         btnGenerate = findViewById(R.id.btnGenerate);
         tvGPU = findViewById(R.id.tvGpuUsage);
+        btnClearChat = findViewById(R.id.btnClearChat);
+        btnHistory = findViewById(R.id.btnHistory);
+
+        // Setup chat RecyclerView
+        rvChat = findViewById(R.id.rvChat);
+        setupChatRecyclerView();
+        
+        // Load chat history
+        loadChatHistory();
+        
         // find stop button if present in layout
         btnStop = findViewById(R.id.btnStop);
         if (btnStop == null) {
@@ -136,7 +185,7 @@ public class MainActivity extends AppCompatActivity {
 
         btnModels.setOnClickListener(v -> {
             try {
-                startActivityForResult(new android.content.Intent(MainActivity.this, ModelListActivity.class), 1001);
+                startActivityForResult(new Intent(MainActivity.this, ModelListActivity.class), REQUEST_MODEL_LIST);
             } catch (Exception ex) {
                 Log.e(TAG, "Failed to open ModelListActivity", ex);
                 toast("Cannot open models list");
@@ -146,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
         // allow tapping the model label to change model as well
         tvModelPath.setOnClickListener(v -> {
             try {
-                startActivityForResult(new android.content.Intent(MainActivity.this, ModelListActivity.class), 1001);
+                startActivityForResult(new Intent(MainActivity.this, ModelListActivity.class), REQUEST_MODEL_LIST);
             } catch (Exception ex) {
                 Log.e(TAG, "Failed to open ModelListActivity from model label", ex);
                 toast("Cannot open models list");
@@ -155,6 +204,16 @@ public class MainActivity extends AppCompatActivity {
 
         if (btnGenerate != null) {
             btnGenerate.setOnClickListener(v -> generateText());
+        }
+        
+        // Clear chat button
+        if (btnClearChat != null) {
+            btnClearChat.setOnClickListener(v -> showClearChatDialog());
+        }
+
+        // Chat history button
+        if (btnHistory != null) {
+            btnHistory.setOnClickListener(v -> openChatHistory());
         }
 
         // If a model was found earlier, attempt to load it
@@ -175,6 +234,125 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Throwable ignored) {
         }
+    }
+    
+    private void openChatHistory() {
+        try {
+            startActivityForResult(new Intent(this, ChatHistoryActivity.class), REQUEST_CHAT_HISTORY);
+        } catch (Exception ex) {
+            Log.e(TAG, "Failed to open ChatHistoryActivity", ex);
+            toast("Cannot open chat history");
+        }
+    }
+
+    private void setupChatRecyclerView() {
+        chatAdapter = new ChatAdapter();
+        LinearLayoutManager layoutManager = new LinearLayoutManager(this);
+        layoutManager.setStackFromEnd(true);
+        rvChat.setLayoutManager(layoutManager);
+        rvChat.setAdapter(chatAdapter);
+    }
+
+    private void loadChatHistory() {
+        chatRepository.getAllMessages(messages -> {
+            if (messages != null && !messages.isEmpty()) {
+                chatAdapter.setMessages(messages);
+                scrollToBottom();
+                
+                // Get the session ID from the most recent message
+                ChatMessage lastMessage = messages.get(messages.size() - 1);
+                if (lastMessage.getSessionId() != null && !lastMessage.getSessionId().isEmpty()) {
+                    currentSessionId = lastMessage.getSessionId();
+                }
+
+                // Rebuild conversation history for context
+                convoHistory.clear();
+                for (ChatMessage msg : messages) {
+                    if (msg.isUser()) {
+                        convoHistory.addLast(ModelUtils.formatPrompt(msg.getContent()));
+                    } else {
+                        // Append AI response to last entry if exists
+                        if (!convoHistory.isEmpty()) {
+                            String last = convoHistory.removeLast();
+                            convoHistory.addLast(last + msg.getContent() + "\n");
+                        }
+                    }
+                }
+                // Trim to max entries
+                while (convoHistory.size() > MAX_HISTORY_ENTRIES) {
+                    convoHistory.removeFirst();
+                }
+            }
+        });
+    }
+    
+    private void loadSession(String sessionId) {
+        currentSessionId = sessionId;
+        contextPrimed = false;
+
+        chatRepository.getMessagesBySession(sessionId, messages -> {
+            chatAdapter.setMessages(messages);
+            scrollToBottom();
+
+            // Rebuild conversation history for context
+            convoHistory.clear();
+            if (messages != null) {
+                for (ChatMessage msg : messages) {
+                    if (msg.isUser()) {
+                        convoHistory.addLast(ModelUtils.formatPrompt(msg.getContent()));
+                    } else {
+                        if (!convoHistory.isEmpty()) {
+                            String last = convoHistory.removeLast();
+                            convoHistory.addLast(last + msg.getContent() + "\n");
+                        }
+                    }
+                }
+                while (convoHistory.size() > MAX_HISTORY_ENTRIES) {
+                    convoHistory.removeFirst();
+                }
+            }
+        });
+    }
+
+    private void startNewChat() {
+        currentSessionId = UUID.randomUUID().toString();
+        contextPrimed = false;
+        convoHistory.clear();
+        chatAdapter.clearMessages();
+    }
+
+    private void scrollToBottom() {
+        if (rvChat != null && chatAdapter.getItemCount() > 0) {
+            rvChat.smoothScrollToPosition(chatAdapter.getItemCount() - 1);
+        }
+    }
+
+    private void showClearChatDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.btn_clear_chat)
+            .setMessage(R.string.confirm_clear_chat)
+            .setPositiveButton(R.string.yes, (dialog, which) -> clearChatHistory())
+            .setNegativeButton(R.string.no, null)
+            .show();
+    }
+
+    private void clearChatHistory() {
+        chatRepository.deleteAllMessages(() -> {
+            chatAdapter.clearMessages();
+            convoHistory.clear();
+            contextPrimed = false;
+            currentSessionId = UUID.randomUUID().toString();
+            toast(getString(R.string.chat_cleared));
+        });
+    }
+
+    private void addMessageToChat(String content, boolean isUser) {
+        ChatMessage message = new ChatMessage(content, isUser, currentSessionId);
+        chatRepository.insertMessage(message, messageId -> {
+            message.setId(messageId);
+            chatAdapter.addMessage(message);
+            scrollToBottom();
+        });
     }
 
     private void monitorGPU() {
@@ -229,9 +407,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 1001 && resultCode == RESULT_OK && data != null) {
+
+        if (requestCode == REQUEST_MODEL_LIST && resultCode == RESULT_OK && data != null) {
             String path = data.getStringExtra("modelPath");
             if (path != null && !path.isEmpty()) {
                 modelFile = new File(path);
@@ -239,12 +418,21 @@ public class MainActivity extends AppCompatActivity {
                 // reload the selected model automatically
                 loadModel();
             }
+        } else if (requestCode == REQUEST_CHAT_HISTORY) {
+            if (resultCode == ChatHistoryActivity.RESULT_LOAD_SESSION && data != null) {
+                String sessionId = data.getStringExtra(ChatHistoryActivity.EXTRA_SESSION_ID);
+                if (sessionId != null && !sessionId.isEmpty()) {
+                    loadSession(sessionId);
+                }
+            } else if (resultCode == ChatHistoryActivity.RESULT_NEW_CHAT) {
+                startNewChat();
+            }
         }
     }
 
     private void loadModel() {
         setBusy(true);
-        if (tvOutput != null) tvOutput.setText("Loading model...");
+        // Show loading in chat
         Log.i(TAG, "loadModel: starting");
         RuntimeLog.append("loadModel: starting");
 
@@ -253,10 +441,8 @@ public class MainActivity extends AppCompatActivity {
             Log.i(TAG, "Model file missing; prompting user to select or download a model");
             mainHandler.post(() -> {
                 try {
-                    if (tvOutput != null)
-                        tvOutput.setText("Model not found. Please select or download a model.");
                     setBusy(false);
-                    startActivityForResult(new android.content.Intent(MainActivity.this, ModelListActivity.class), 1001);
+                    startActivityForResult(new Intent(MainActivity.this, ModelListActivity.class), REQUEST_MODEL_LIST);
                 } catch (Exception ex) {
                     Log.e(TAG, "Failed to launch ModelListActivity", ex);
                     toast("Cannot open models list");
@@ -318,19 +504,14 @@ public class MainActivity extends AppCompatActivity {
                 isModelLoaded = result;
                 contextPrimed = false;
                 setBusy(false);
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
                 if (result) {
-                    if (tvOutput != null) tvOutput.setText("Model loaded successfully.");
                     toast("Model loaded");
                     RuntimeLog.append("Model loaded successfully");
                 } else {
                     if (modelFile == null || !modelFile.exists() || modelFile.length() == 0) {
-                        if (tvOutput != null)
-                            tvOutput.setText("Model file not found. Place the model at:\n" + ModelUtils.getDefaultModelFile(MainActivity.this).getAbsolutePath());
                         toast("Model file not found");
                         RuntimeLog.append("Model file not found in expected path");
                     } else {
-                        if (tvOutput != null) tvOutput.setText("Failed to load model.");
                         toast("Load failed");
                         RuntimeLog.append("Failed to load model");
                     }
@@ -364,9 +545,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // Add user message to chat UI and database
+        addMessageToChat(input, true);
+
         String formattedPrompt = ModelUtils.formatPrompt(input);
         setBusy(true);
-        if (tvOutput != null) tvOutput.setText("Generating...");
 
         // start timer/UI monitor
         mainHandler.post(this::startGenerationMonitor);
@@ -441,14 +624,15 @@ public class MainActivity extends AppCompatActivity {
                     contextPrimed = true;
                 }
 
-                if (tvOutput != null) tvOutput.setText(cleaned);
+                // Add AI response to chat UI and database
+                addMessageToChat(cleaned, false);
+                
                 RuntimeLog.append("Generation finished; output length=" + cleaned.length());
             });
         });
     }
 
     private void setBusy(boolean busy) {
-        if (progressBar != null) progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         if (btnGenerate != null) btnGenerate.setEnabled(!busy);
         if (btnStop != null) {
             btnStop.setVisibility(busy ? View.VISIBLE : View.GONE);
@@ -512,7 +696,9 @@ public class MainActivity extends AppCompatActivity {
         // stop timer/UI monitor
         stopGenerationMonitor();
         setBusy(false);
-        if (tvOutput != null) tvOutput.append("\n\n[Generation stopped by user]");
+        
+        // Add stop message to chat
+        addMessageToChat("[Generation stopped by user]", false);
     }
 
     private void toast(String message) {

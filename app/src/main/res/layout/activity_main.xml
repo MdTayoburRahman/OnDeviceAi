@@ -5,172 +5,368 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:layout_margin="10dp"
+    android:background="@color/background"
+    android:fitsSystemWindows="true"
     tools:context=".MainActivity">
 
-    <TextView
-        android:id="@+id/textView"
+    <!-- App Header Section -->
+    <LinearLayout
+        android:id="@+id/headerSection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:gravity="center_vertical"
+        android:background="@color/primary_container"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent">
 
-    <!-- Model path display -->
-    <TextView
-        android:id="@+id/tvModelPath"
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp">
+
+            <ImageView
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/ic_robot"
+                android:contentDescription="@string/content_desc_ai"
+                app:tint="@color/primary" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="12dp">
+
+                <TextView
+                    android:id="@+id/textView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textAlignment="textEnd"
+                    android:textColor="@color/on_primary_container" />
+
+                <TextView
+                    android:id="@+id/tvModelPath"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/model_not_loaded"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_primary_container"
+                    android:alpha="0.8"
+                    android:textAlignment="textEnd"
+                    android:ellipsize="middle"
+                    android:singleLine="true"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <!-- Chat history button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHistory"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                app:icon="@drawable/ic_history"
+                app:iconTint="@color/on_primary_container"
+                android:contentDescription="@string/btn_chat_history" />
+            <!-- Clear chat button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnClearChat"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                app:icon="@drawable/ic_delete"
+                app:iconTint="@color/on_primary_container"
+                android:contentDescription="@string/btn_clear_chat" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnModels"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:text="@string/btn_models"
+                android:textSize="12sp"
+                app:icon="@drawable/ic_folder"
+                app:iconSize="18dp"
+                app:cornerRadius="20dp" />
+
+        </LinearLayout>
+
+          </LinearLayout>
+
+    <!-- Status Chips Row -->
+    <HorizontalScrollView
+        android:id="@+id/statusScrollView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:paddingTop="8dp"
-        android:text="Model: (not set)"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toStartOf="@+id/btnModels"
-        app:layout_constraintTop_toBottomOf="@id/textView" />
-
-    <Button
-        android:id="@+id/btnModels"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Models"
+        android:scrollbars="none"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:clipToPadding="false"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/textView" />
-
-    <!-- Generation timer and system usage -->
-    <LinearLayout
-        android:id="@+id/llStatus"
-        android:orientation="horizontal"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:paddingTop="8dp"
-        app:layout_constraintTop_toBottomOf="@id/btnModels"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/headerSection">
 
-        <TextView
-            android:id="@+id/tvGenTimer"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:id="@+id/llStatus"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="14sp" />
+            android:orientation="horizontal">
 
+            <!-- Timer Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
 
-        <TextView
-            android:id="@+id/tvRamUsage"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="14sp"
-            android:gravity="end" />
-        <TextView
-            android:id="@+id/tvSysUsage"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="14sp"
-            android:gravity="end" />
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_timer"
+                    android:contentDescription="@string/content_desc_timer" />
 
-    </LinearLayout>
+                <TextView
+                    android:id="@+id/tvGenTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/status_timer_default"
+                    android:textSize="8sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
 
-    <!-- Container with main output and live log panes -->
+            <!-- RAM Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginEnd="8dp">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_memory"
+                    android:contentDescription="@string/content_desc_ram" />
+
+                <TextView
+                    android:id="@+id/tvRamUsage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/status_ram_default"
+                    android:textSize="8sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- CPU/System Chip -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/status_chip_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_cpu"
+                    android:contentDescription="@string/content_desc_cpu" />
+
+                <TextView
+                    android:id="@+id/tvSysUsage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/status_cpu_default"
+                    android:textSize="8sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Main Content Container -->
     <LinearLayout
         android:id="@+id/outputContainer"
-        android:orientation="vertical"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        app:layout_constraintTop_toBottomOf="@id/llStatus"
-        app:layout_constraintBottom_toTopOf="@+id/etPrompt"
+        android:orientation="vertical"
+        android:layout_marginTop="4dp"
+        app:layout_constraintBottom_toTopOf="@+id/inputContainer"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/statusScrollView">
 
+        <!-- GPU Usage Banner (optional) -->
         <TextView
             android:id="@+id/tvGpuUsage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:padding="6dp" />
+            android:background="@drawable/status_chip_background"
+            android:padding="8dp"
+            android:textSize="11sp"
+            android:textColor="@color/on_surface_variant"
+            android:drawablePadding="8dp"
+            android:visibility="gone"
+            android:maxLines="2"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginBottom="8dp" />
 
+        <!-- Chat History RecyclerView -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvChat"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="3"
+            android:clipToPadding="false"
+            android:paddingVertical="8dp"
+            tools:listitem="@layout/item_chat_ai" />
+
+        <!-- Hidden tvOutput for backward compatibility -->
+        <TextView
+            android:id="@+id/tvOutput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <!-- Hidden scrollOutput for backward compatibility -->
         <ScrollView
             android:id="@+id/scrollOutput"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="3">
+            android:visibility="gone">
             <TextView
-                android:id="@+id/tvOutput"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/default_output"
-                android:textIsSelectable="true"
-                android:textSize="16sp"
-                android:padding="12dp" />
+                android:layout_height="wrap_content" />
         </ScrollView>
 
-        <!-- Live processing log pane for native / llama_jni messages -->
-        <TextView
-            android:id="@+id/tvLogHeader"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="AI Log"
-            android:textStyle="bold"
-            android:paddingLeft="6dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="2dp"
-            android:textSize="12sp" />
-
-        <ScrollView
-            android:id="@+id/scrollLog"
+        <!-- AI Log Section -->
+        <LinearLayout
+            android:id="@+id/logContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:background="@color/black"
-            android:layout_weight="1">
-            <TextView
-                android:id="@+id/tvLog"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textIsSelectable="true"
-                android:textSize="12sp"
-                android:padding="8dp"
-                android:textColor="@color/white"
-                android:fontFamily="monospace" />
-        </ScrollView>
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="@drawable/log_panel_background"
+            android:layout_marginHorizontal="8dp"
+            android:layout_marginBottom="8dp"
+            android:padding="2dp">
 
+            <!-- Log Header with compound drawable -->
+            <TextView
+                android:id="@+id/tvLogHeader"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/log_header"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/log_text"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp"
+                android:drawableStart="@drawable/ic_terminal"
+                android:drawablePadding="8dp" />
+
+            <!-- Log Content -->
+            <ScrollView
+                android:id="@+id/scrollLog"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:paddingHorizontal="12dp"
+                android:clipToPadding="false">
+
+                <TextView
+                    android:id="@+id/tvLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textIsSelectable="true"
+                    android:textSize="8sp"
+                    android:textColor="@color/log_text"
+                    android:fontFamily="monospace"
+                    android:lineSpacingMultiplier="1.3" />
+            </ScrollView>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Prompt input pinned above the buttons at the bottom -->
-    <EditText
-        android:id="@+id/etPrompt"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:hint="@string/hint_prompt"
-        android:inputType="textMultiLine"
-        android:minLines="2"
-        android:paddingTop="8dp"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toTopOf="@+id/llButtons" />
-
-    <!-- Buttons pinned to the bottom of the screen -->
+    <!-- Input Container - Fixed at bottom -->
     <LinearLayout
-        android:id="@+id/llButtons"
-        android:orientation="horizontal"
+        android:id="@+id/inputContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp"
+        android:gravity="center_vertical"
+        android:background="@color/surface"
+        android:elevation="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
-        <Button
-            android:id="@+id/btnGenerate"
+        <EditText
+            android:id="@+id/etPrompt"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/btn_generate" />
+            android:hint="@string/hint_prompt"
+            android:inputType="textMultiLine|textCapSentences"
+            android:imeOptions="actionSend"
+            android:minLines="1"
+            android:maxLines="4"
+            android:background="@drawable/input_background"
+            android:textColor="@color/on_surface"
+            android:textColorHint="@color/on_surface_variant"
+            android:textSize="15sp"
+            android:layout_marginEnd="12dp"
+            android:importantForAutofill="no"
+            android:scrollbars="vertical"
+            tools:ignore="LabelFor" />
 
-        <Button
+        <!-- Generate Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnGenerate"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            app:icon="@drawable/ic_send"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:cornerRadius="28dp"
+            app:backgroundTint="@color/primary"
+            android:contentDescription="@string/btn_generate" />
+
+        <!-- Stop Button (hidden by default) -->
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStop"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/btn_stop"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            app:icon="@drawable/ic_stop"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:cornerRadius="28dp"
+            app:backgroundTint="@color/error"
+            android:contentDescription="@string/btn_stop"
             android:visibility="gone" />
 
     </LinearLayout>

@@ -1,8 +1,46 @@
 <resources>
-    <string name="app_name">OnDeviceAi</string>
-    <string name="hint_prompt">Type your prompt</string>
+    <string name="app_name">OnDevice AI</string>
+    <string name="hint_prompt">Ask me anything…</string>
     <string name="btn_load_model">Load Model</string>
     <string name="btn_generate">Generate</string>
     <string name="btn_stop">Stop</string>
-    <string name="default_output">AI response will appear here.</string>
+    <string name="default_output">AI response will appear here…</string>
+    <string name="model_not_loaded">No model loaded</string>
+    <string name="model_loaded">Model: %s</string>
+    <string name="btn_select_model">Select Model</string>
+    <string name="btn_models">Models</string>
+    <string name="btn_clear_chat">Clear chat</string>
+    <string name="status_timer">Time: %s</string>
+    <string name="status_timer_default">0.0s</string>
+    <string name="status_ram">RAM: %s</string>
+    <string name="status_ram_default">RAM: --</string>
+    <string name="status_cpu">CPU: %s</string>
+    <string name="status_cpu_default">CPU: --</string>
+    <string name="status_gpu">GPU: %s</string>
+    <string name="log_header">AI Log</string>
+    <string name="app_subtitle">On-Device Language Model</string>
+    <string name="content_desc_ai">AI Assistant</string>
+    <string name="content_desc_timer">Timer</string>
+    <string name="content_desc_ram">RAM Usage</string>
+    <string name="content_desc_cpu">CPU Usage</string>
+    <string name="content_desc_log">Log Terminal</string>
+    <string name="content_desc_chat">Chat</string>
+    <string name="chat_cleared">Chat history cleared</string>
+    <string name="confirm_clear_chat">Clear all chat history?</string>
+    <string name="yes">Yes</string>
+
+    <!-- Chat History -->
+    <string name="chat_history_title">Chat History</string>
+    <string name="btn_chat_history">History</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_clear_all">Clear All</string>
+    <string name="btn_delete_session">Delete chat</string>
+    <string name="btn_new_chat">New Chat</string>
+    <string name="no_chat_history">No chat history</string>
+    <string name="no_chat_history_desc">Your conversations will appear here</string>
+    <string name="confirm_delete_session">Delete this conversation?</string>
+    <string name="confirm_clear_all_history">Delete all chat history? This cannot be undone.</string>
+    <string name="session_deleted">Conversation deleted</string>
+    <string name="all_history_deleted">All history deleted</string>
+    <string name="no">No</string>
 </resources>

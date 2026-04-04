@@ -11,10 +11,68 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <stdarg.h>
 
 static const char *TAG = "llama_jni";
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+// Cache JavaVM so native code can call back into Java (RuntimeLog.append)
+static JavaVM *g_jvm = nullptr;
+
+// Helper to append a message into the in-app AI log (RuntimeLog.append)
+static void jni_append_runtime_log(const char *message) {
+    if (!g_jvm || !message) return;
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    // Try to get JNIEnv for this thread; attach if needed
+    if (g_jvm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+        attached = true;
+    }
+
+    // Find the RuntimeLog class and call RuntimeLog.append(String)
+    jclass cls = env->FindClass("com/droidrocks/ondeviceai/RuntimeLog");
+    if (cls) {
+        jmethodID mid = env->GetStaticMethodID(cls, "append", "(Ljava/lang/String;)V");
+        if (mid) {
+            jstring jstr = env->NewStringUTF(message);
+            env->CallStaticVoidMethod(cls, mid, jstr);
+            env->DeleteLocalRef(jstr);
+        }
+        env->DeleteLocalRef(cls);
+    }
+
+    if (attached) g_jvm->DetachCurrentThread();
+}
+
+// Generic logger that forwards to Android log and the in-app RuntimeLog
+static void LogMsg(int prio, const char *tag, const char *fmt, ...) {
+    char buf[2048];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    // Android log
+    __android_log_print(prio, tag, "%s", buf);
+
+    // Also send to in-app runtime log (prefix with tag)
+    char outbuf[2112];
+    snprintf(outbuf, sizeof(outbuf), "%s: %s", tag ? tag : "", buf);
+    jni_append_runtime_log(outbuf);
+}
+
+#define LOGI(...) LogMsg(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGE(...) LogMsg(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+// Cache JavaVM on load so native threads can call back into Java
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    g_jvm = vm;
+    return JNI_VERSION_1_6;
+}
+
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    (void) vm; (void) reserved;
+    g_jvm = nullptr;
+}
 
 static std::mutex g_mutex;
 
