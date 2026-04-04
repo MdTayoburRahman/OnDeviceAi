@@ -35,17 +35,25 @@ find_library(log-lib log)
 #
 if(EXISTS "${CMAKE_SOURCE_DIR}/llama.cpp/CMakeLists.txt")
     message(STATUS "llama.cpp detected under ${CMAKE_SOURCE_DIR}/llama.cpp - enabling integration")
+
+    # Enable Vulkan GPU compute backend in ggml BEFORE adding the subdirectory.
+    # IMPORTANT: Requires the LunarG Vulkan SDK installed on the *host* Windows
+    # machine so that glslc.exe is available for shader compilation.
+    # Download from: https://vulkan.lunarg.com/sdk/home#windows
+    #
+    # If the Vulkan SDK is installed, uncomment the next line (and the vulkan
+    # link line below) to enable GPU acceleration:
+    # set(GGML_VULKAN ON CACHE BOOL "Enable ggml Vulkan backend" FORCE)
+
     add_subdirectory("${CMAKE_SOURCE_DIR}/llama.cpp" llama_cpp_build)
+
     # define a compile flag so the JNI C++ file compiles the real integration branch
     target_compile_definitions(llama_jni PRIVATE HAVE_LLAMA_CPP)
-    # link against the llama target produced by upstream; the target name may
-    # vary depending on the version - check the llama.cpp CMake files and
-    # replace 'llama' with the correct target if different.
+    # link against the llama target produced by upstream
     target_link_libraries(llama_jni PRIVATE llama)
-    # If Vulkan is available on the NDK/toolchain, enable ggml/vulkan support
-    # (this is a best-effort compile flag; upstream ggml/llama.cpp must support
-    # a Vulkan backend for this to have effect).
-    target_compile_definitions(llama_jni PRIVATE GGML_USE_VULKAN)
+    # Link Vulkan for our JNI probe code (detects GPU availability at runtime).
+    # This uses the NDK's Vulkan headers/library and does NOT require the host
+    # Vulkan SDK — it's independent of the GGML_VULKAN shader compilation above.
     target_link_libraries(llama_jni PRIVATE vulkan)
 else()
     message(STATUS "llama.cpp not detected - building llama_jni with placeholder JNI implementation")

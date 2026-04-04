@@ -23,6 +23,18 @@ public class LlamaBridge {
 
     public native String generate(String prompt, int maxTokens, float temperature, float topP);
 
+    /** Callback interface for streaming token-by-token output */
+    public interface TokenCallback {
+        /** Called from native for each generated token. Return false to stop generation. */
+        boolean onToken(String token);
+    }
+
+    /**
+     * Streaming generation — calls {@code callback.onToken()} for every token as it is produced.
+     * Returns the full concatenated output when finished.
+     */
+    public native String generateStreaming(String prompt, int maxTokens, float temperature, float topP, TokenCallback callback);
+
     // Request cooperative interruption of a running generation (best-effort).
     // Implemented in native code; sets a flag the native loop checks.
     public native void interruptGeneration();

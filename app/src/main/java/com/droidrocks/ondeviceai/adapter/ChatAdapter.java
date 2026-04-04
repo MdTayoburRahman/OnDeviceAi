@@ -47,6 +47,16 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     @Override
+    public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position, @NonNull List<Object> payloads) {
+        if (!payloads.isEmpty() && holder instanceof AiMessageViewHolder) {
+            // Partial bind for streaming updates — just set the text, skip full rebind
+            ((AiMessageViewHolder) holder).tvMessage.setText(messages.get(position).getContent());
+            return;
+        }
+        onBindViewHolder(holder, position);
+    }
+
+    @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         ChatMessage message = messages.get(position);
         String time = timeFormat.format(new Date(message.getTimestamp()));
@@ -83,6 +93,21 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void clearMessages() {
         messages.clear();
         notifyDataSetChanged();
+    }
+
+    /**
+     * Update the content of the last AI message in-place (used for streaming tokens).
+     * Uses a payload so RecyclerView skips the default cross-fade animation.
+     * Must be called on the UI thread.
+     */
+    public void updateLastMessage(String newContent) {
+        if (messages.isEmpty()) return;
+        int lastIdx = messages.size() - 1;
+        ChatMessage last = messages.get(lastIdx);
+        if (!last.isUser()) {
+            last.setContent(newContent);
+            notifyItemChanged(lastIdx, "streaming");
+        }
     }
 
     public List<ChatMessage> getMessages() {

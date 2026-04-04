@@ -260,13 +260,21 @@ public class MainActivity extends BaseActivity {
         }
     }
 
-    private void setupChatRecyclerView() {
-        chatAdapter = new ChatAdapter();
-        LinearLayoutManager layoutManager = new LinearLayoutManager(this);
-        layoutManager.setStackFromEnd(true);
-        rvChat.setLayoutManager(layoutManager);
-        rvChat.setAdapter(chatAdapter);
+private void setupChatRecyclerView() {
+    chatAdapter = new ChatAdapter();
+    LinearLayoutManager layoutManager = new LinearLayoutManager(this);
+    layoutManager.setStackFromEnd(true);
+    rvChat.setLayoutManager(layoutManager);
+    rvChat.setAdapter(chatAdapter);
+
+    // Disable change animations so streaming token updates don't cause
+    // the default cross-fade flicker on every notifyItemChanged call.
+    RecyclerView.ItemAnimator animator = rvChat.getItemAnimator();
+    if (animator instanceof androidx.recyclerview.widget.DefaultItemAnimator) {
+        ((androidx.recyclerview.widget.DefaultItemAnimator) animator)
+                .setSupportsChangeAnimations(false);
     }
+}
 
     private void loadChatHistory() {
         chatRepository.getAllMessages(messages -> {
@@ -585,8 +593,8 @@ public class MainActivity extends BaseActivity {
         currentGenFuture = executor.submit(() -> {
             String result = "";
             try {
-                Log.i(TAG, "Calling native generate");
-                RuntimeLog.append("Calling native generate");
+                Log.i(TAG, "Calling native generate (streaming)");
+                RuntimeLog.append("Calling native generateStreaming");
                 if (!LlamaBridge.isNativeLoaded()) {
                     throw new IllegalStateException("Native library not loaded");
                 }
@@ -614,14 +622,48 @@ public class MainActivity extends BaseActivity {
                     toSend = formattedPrompt;
                 }
 
-                // Use lower temperature (0.4) and higher top_p (0.95) for faster, more coherent output
-                // Lower temp = less randomness = faster sampling
-                result = llamaBridge.generate(toSend, 150, fastMode ? 0.0f : 0.4f, fastMode ? 1.0f : 0.95f);
-                Log.i(TAG, "Native generate returned length=" + (result != null ? result.length() : 0));
-                RuntimeLog.append("Native generate returned length=" + (result != null ? result.length() : 0));
+                // Add a placeholder AI message to chat so streaming tokens appear immediately
+                final ChatMessage aiMsg = new ChatMessage("▍", false, currentSessionId);
+                mainHandler.post(() -> {
+                    chatAdapter.addMessage(aiMsg);
+                    scrollToBottom();
+                });
+
+                // Accumulator for streamed tokens
+                final StringBuilder streamed = new StringBuilder();
+                final int[] tokenCount = {0};
+
+                // Use streaming generation — callback fires per token on this background thread
+                result = llamaBridge.generateStreaming(toSend, 150,
+                        fastMode ? 0.0f : 0.4f, fastMode ? 1.0f : 0.95f,
+                        token -> {
+                            streamed.append(token);
+                            tokenCount[0]++;
+                            final String snapshot = formatAiResponse(streamed.toString());
+                            if (tokenCount[0] <= 3 || tokenCount[0] % 20 == 0) {
+                                Log.d(TAG, "onToken #" + tokenCount[0] + " len=" + token.length()
+                                        + " snapshot_len=" + snapshot.length()
+                                        + " preview=" + (snapshot.length() > 40 ? snapshot.substring(0, 40) + "..." : snapshot));
+                            }
+                            mainHandler.post(() -> {
+                                chatAdapter.updateLastMessage(snapshot + "▍");
+                                scrollToBottom();
+                            });
+                            return !stopRequested; // return false to stop
+                        });
+
+                // Final update: remove cursor and set final text
+                final String finalText = formatAiResponse(result != null ? result : streamed.toString());
+                mainHandler.post(() -> chatAdapter.updateLastMessage(finalText));
+
+                Log.i(TAG, "Native generateStreaming returned length=" + (result != null ? result.length() : 0));
+                RuntimeLog.append("Native generateStreaming returned length=" + (result != null ? result.length() : 0));
             } catch (Throwable t) {
                 result = "Error: " + t.getMessage();
                 Log.e(TAG, "Exception during generate", t);
+                // On error, update the streaming placeholder with the error
+                final String errMsg = result;
+                mainHandler.post(() -> chatAdapter.updateLastMessage(errMsg));
             } finally {
                 currentGenFuture = null;
                 stopRequested = false;
@@ -637,6 +679,9 @@ public class MainActivity extends BaseActivity {
                 // Format the response nicely
                 String cleaned = formatAiResponse(finalResult);
 
+                // Final update on the streamed message (remove cursor etc.)
+                chatAdapter.updateLastMessage(cleaned);
+
                 try {
                     String historyEntry = formattedPrompt + cleaned + "\n";
                     synchronized (convoHistory) {
@@ -651,9 +696,10 @@ public class MainActivity extends BaseActivity {
                     contextPrimed = true;
                 }
 
-                // Add AI response to chat UI and database
-                addMessageToChat(cleaned, false);
-                
+                // Save the AI message to database (it was already added to the adapter during streaming)
+                ChatMessage dbMsg = new ChatMessage(cleaned, false, currentSessionId);
+                chatRepository.insertMessage(dbMsg, messageId -> {});
+
                 RuntimeLog.append("Generation finished; output length=" + cleaned.length());
             });
         });
