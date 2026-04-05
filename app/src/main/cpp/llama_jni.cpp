@@ -513,6 +513,8 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_ctx || !g_model) return env->NewStringUTF("Model is not loaded.");
 
+    g_stop_requested.store(false); // clear stale stop state
+
     const char *promptChars = env->GetStringUTFChars(prompt, nullptr);
     std::string input = promptChars ? promptChars : "";
     env->ReleaseStringUTFChars(prompt, promptChars);
@@ -682,6 +684,11 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
         jobject callback) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_ctx || !g_model) return env->NewStringUTF("Model is not loaded.");
+
+    // Always clear stale stop state from any previous interrupted generation.
+    // This is critical because early-exit paths (e.g. abort during prompt decode)
+    // may leave g_stop_requested == true, which would immediately cancel this call.
+    g_stop_requested.store(false);
 
     LOGI("[llama_jni] === STREAMING GENERATE START ===");
 

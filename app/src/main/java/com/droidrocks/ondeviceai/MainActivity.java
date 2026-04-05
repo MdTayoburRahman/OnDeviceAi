@@ -78,6 +78,10 @@ public class MainActivity extends BaseActivity {
     // track current generation task so we can cancel it
     private volatile Future<?> currentGenFuture = null;
     private volatile boolean stopRequested = false;
+    // Monotonically increasing counter to identify each generation.
+    // Old tasks compare their captured ID against the current value to
+    // avoid overwriting a newer generation's streaming message.
+    private volatile int generationId = 0;
     private CpuMonitor cpuMonitor;
     private RamMonitor ramMonitor;
 
@@ -589,6 +593,12 @@ private void setupChatRecyclerView() {
         addMessageToChat(input, true);
 
         String formattedPrompt = ModelUtils.formatPrompt(input);
+
+        // Increment generation ID so any still-running old task knows it's stale
+        final int thisGenId = ++generationId;
+        // Clear any leftover stop state from a previous generation
+        stopRequested = false;
+
         setBusy(true);
 
         // start timer/UI monitor
@@ -597,13 +607,18 @@ private void setupChatRecyclerView() {
         currentGenFuture = executor.submit(() -> {
             String result = "";
             try {
-                Log.i(TAG, "Calling native generate (streaming)");
+                Log.i(TAG, "Calling native generate (streaming) genId=" + thisGenId);
                 RuntimeLog.append("Calling native generateStreaming");
                 if (!LlamaBridge.isNativeLoaded()) {
                     throw new IllegalStateException("Native library not loaded");
                 }
                 if (llamaBridge == null) llamaBridge = new LlamaBridge();
 
+                // If this task is already stale (user started a newer generation), skip
+                if (thisGenId != generationId) {
+                    Log.i(TAG, "Skipping stale generation task genId=" + thisGenId);
+                    return;
+                }
 
                 String toSend;
                 if (!contextPrimed) {
@@ -629,6 +644,7 @@ private void setupChatRecyclerView() {
                 // Add a placeholder AI message to chat so streaming tokens appear immediately
                 final ChatMessage aiMsg = new ChatMessage("▍", false, currentSessionId);
                 mainHandler.post(() -> {
+                    if (thisGenId != generationId) return; // stale
                     chatAdapter.addMessage(aiMsg);
                     scrollToBottom();
                 });
@@ -650,31 +666,43 @@ private void setupChatRecyclerView() {
                                         + " preview=" + (snapshot.length() > 40 ? snapshot.substring(0, 40) + "..." : snapshot));
                             }
                             mainHandler.post(() -> {
+                                if (thisGenId != generationId) return; // stale
                                 chatAdapter.updateLastMessage(snapshot + "▍");
                                 scrollToBottom();
                             });
-                            return !stopRequested; // return false to stop
+                            return !stopRequested && thisGenId == generationId;
                         });
 
                 // Final update: remove cursor and set final text
                 final String finalText = formatAiResponse(result != null ? result : streamed.toString());
-                mainHandler.post(() -> chatAdapter.updateLastMessage(finalText));
+                mainHandler.post(() -> {
+                    if (thisGenId != generationId) return; // stale
+                    chatAdapter.updateLastMessage(finalText);
+                });
 
                 Log.i(TAG, "Native generateStreaming returned length=" + (result != null ? result.length() : 0));
                 RuntimeLog.append("Native generateStreaming returned length=" + (result != null ? result.length() : 0));
             } catch (Throwable t) {
                 result = "Error: " + t.getMessage();
                 Log.e(TAG, "Exception during generate", t);
-                // On error, update the streaming placeholder with the error
                 final String errMsg = result;
-                mainHandler.post(() -> chatAdapter.updateLastMessage(errMsg));
+                mainHandler.post(() -> {
+                    if (thisGenId != generationId) return; // stale
+                    chatAdapter.updateLastMessage(errMsg);
+                });
             } finally {
                 currentGenFuture = null;
-                stopRequested = false;
+                // Only clear stopRequested if this is still the current generation
+                if (thisGenId == generationId) {
+                    stopRequested = false;
+                }
             }
 
             final String finalResult = result != null ? result : "";
             mainHandler.post(() -> {
+                // Only update UI if this is still the current generation
+                if (thisGenId != generationId) return;
+
                 // stop timer/UI monitor for generation
                 stopGenerationMonitor();
 
@@ -757,6 +785,11 @@ private void setupChatRecyclerView() {
             return;
         }
         Log.i(TAG, "stopGeneration: user requested stop");
+
+        // Increment generationId so the old task's callbacks become stale
+        // and won't overwrite UI when they eventually fire.
+        generationId++;
+
         stopRequested = true;
         try {
             if (llamaBridge != null && LlamaBridge.isNativeLoaded()) {
@@ -773,9 +806,10 @@ private void setupChatRecyclerView() {
         // stop timer/UI monitor
         stopGenerationMonitor();
         setBusy(false);
-        
-        // Add stop message to chat
-        addMessageToChat("[Generation stopped by user]", false);
+
+        // Update the existing AI streaming placeholder to show it was stopped
+        // (don't add a new message — that would break updateLastMessage ordering)
+        chatAdapter.updateLastMessage("[Generation stopped by user]");
     }
 
     private void toast(String message) {
