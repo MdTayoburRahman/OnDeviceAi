@@ -41,6 +41,7 @@
     <string name="reset_in_progress">Resetting session…</string>
     <string name="reset_success">Session reset</string>
     <string name="reset_failed">Session reset failed</string>
+    <string name="loading_model">Loading model…</string>
     <string name="no_chat_history">No chat history</string>
     <string name="no_chat_history_desc">Your conversations will appear here</string>
     <string name="confirm_delete_session">Delete this conversation?</string>

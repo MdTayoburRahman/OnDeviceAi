@@ -26,6 +26,7 @@ import com.droidrocks.ondeviceai.data.ChatMessage;
 import com.droidrocks.ondeviceai.data.ChatRepository;
 import android.widget.ScrollView;
 import android.widget.ProgressBar;
+import com.google.android.material.snackbar.Snackbar;
 
 import java.io.File;
 import java.util.UUID;
@@ -50,6 +51,7 @@ public class MainActivity extends BaseActivity {
     private Button btnHistory;
     private Button btnNewChat; // dynamically-created or from layout: starts a fresh chat and resets native session
     private ProgressBar progressResetSession;
+    private Snackbar loadingSnackbar;
     private TextView tvGenTimer;
     private TextView tvSysUsage;
 
@@ -144,6 +146,10 @@ public class MainActivity extends BaseActivity {
         btnGenerate = findViewById(R.id.btnGenerate);
         btnClearChat = findViewById(R.id.btnClearChat);
         btnHistory = findViewById(R.id.btnHistory);
+
+        // Initially hide interactive buttons until a model is successfully loaded.
+        // Keep Models visible so the user can open model picker if needed.
+        updateButtonsForModelLoaded(false);
 
         // New Chat button: try to find one in the layout, otherwise create it next to the models button
         btnNewChat = findViewById(getResources().getIdentifier("btnNewChat", "id", getPackageName()));
@@ -261,6 +267,27 @@ public class MainActivity extends BaseActivity {
         // Wire the New Chat button to start a fresh conversation and reset native session state.
         if (btnNewChat != null) {
             btnNewChat.setOnClickListener(v -> {
+                // If a generation is in progress, request cooperative stop silently
+                try {
+                    generationId++; // mark older generation tasks as stale
+                    stopRequested = true;
+                    if (llamaBridge != null && LlamaBridge.isNativeLoaded()) {
+                        try {
+                            llamaBridge.interruptGeneration();
+                        } catch (Throwable ignored) {}
+                    }
+                    try {
+                        if (currentGenFuture != null) currentGenFuture.cancel(true);
+                    } catch (Throwable ignored) {}
+                    // stop monitor and UI busy indicators
+                    mainHandler.post(() -> {
+                        try {
+                            stopGenerationMonitor();
+                            setBusy(false);
+                        } catch (Throwable ignored) {}
+                    });
+                } catch (Throwable ignored) {}
+
                 // Start UI-side new chat immediately
                 startNewChat();
                 toast(getString(R.string.btn_new_chat));
@@ -559,6 +586,17 @@ private void setupChatRecyclerView() {
 
     private void loadModel() {
         setBusy(true);
+        // hide all interactive buttons while model is loading
+        mainHandler.post(() -> {
+            updateButtonsForModelLoaded(false);
+            try {
+                View root = findViewById(R.id.main);
+                if (root != null) {
+                    loadingSnackbar = Snackbar.make(root, getString(R.string.loading_model), Snackbar.LENGTH_INDEFINITE);
+                    loadingSnackbar.show();
+                }
+            } catch (Throwable ignored) {}
+        });
         // Show loading in chat
         Log.i(TAG, "loadModel: starting");
         RuntimeLog.append("loadModel: starting");
@@ -631,6 +669,11 @@ private void setupChatRecyclerView() {
                 isModelLoaded = result;
                 contextPrimed = false;
                 setBusy(false);
+                // Show appropriate buttons only after a successful model load
+                try {
+                    if (loadingSnackbar != null) loadingSnackbar.dismiss();
+                } catch (Throwable ignored) {}
+                updateButtonsForModelLoaded(result);
                 if (result) {
                     RuntimeLog.append("Model loaded successfully");
                 } else {
@@ -818,11 +861,62 @@ private void setupChatRecyclerView() {
     }
 
     private void setBusy(boolean busy) {
-        if (btnGenerate != null) btnGenerate.setEnabled(!busy);
-        if (btnStop != null) {
-            btnStop.setVisibility(busy ? View.VISIBLE : View.GONE);
-            btnStop.setEnabled(busy);
+        // While busy (generation or long native operation) only show the Stop button.
+        if (busy) {
+            if (btnGenerate != null) {
+                btnGenerate.setVisibility(View.GONE);
+                btnGenerate.setEnabled(false);
+            }
+            if (btnNewChat != null) {
+                btnNewChat.setVisibility(View.GONE);
+                btnNewChat.setEnabled(false);
+            }
+            if (btnStop != null) {
+                btnStop.setVisibility(View.VISIBLE);
+                btnStop.setEnabled(true);
+            }
+        } else {
+            // Not busy — show primary actions and hide Stop
+            if (btnGenerate != null) {
+                btnGenerate.setVisibility(View.VISIBLE);
+                btnGenerate.setEnabled(true);
+            }
+            if (btnNewChat != null) {
+                btnNewChat.setVisibility(View.VISIBLE);
+                btnNewChat.setEnabled(true);
+            }
+            if (btnStop != null) {
+                btnStop.setVisibility(View.GONE);
+                btnStop.setEnabled(false);
+            }
         }
+    }
+
+    /** Control visibility of primary buttons depending on whether a model is loaded.
+     * When loaded==false we hide Generate/NewChat/Stop/Clear/History to avoid user actions
+     * until a model is ready; Models button remains visible so user can pick a model.
+     */
+    private void updateButtonsForModelLoaded(boolean loaded) {
+        try {
+            if (!loaded) {
+                // Hide all buttons until a model is successfully loaded
+                if (btnGenerate != null) { btnGenerate.setVisibility(View.GONE); btnGenerate.setEnabled(false); }
+                if (btnNewChat != null) { btnNewChat.setVisibility(View.GONE); btnNewChat.setEnabled(false); }
+                if (btnStop != null) { btnStop.setVisibility(View.GONE); btnStop.setEnabled(false); }
+                if (btnClearChat != null) { btnClearChat.setVisibility(View.GONE); btnClearChat.setEnabled(false); }
+                if (btnHistory != null) { btnHistory.setVisibility(View.GONE); btnHistory.setEnabled(false); }
+                if (btnModels != null) { btnModels.setVisibility(View.VISIBLE); btnModels.setEnabled(true); }
+                if (progressResetSession != null) progressResetSession.setVisibility(View.GONE);
+            } else {
+                // model loaded — show primary actions (generate/new chat) and keep stop hidden
+                if (btnModels != null) { btnModels.setVisibility(View.VISIBLE); btnModels.setEnabled(true); }
+                if (btnGenerate != null) { btnGenerate.setVisibility(View.VISIBLE); btnGenerate.setEnabled(true); }
+                if (btnNewChat != null) { btnNewChat.setVisibility(View.VISIBLE); btnNewChat.setEnabled(true); }
+                if (btnClearChat != null) { btnClearChat.setVisibility(View.VISIBLE); btnClearChat.setEnabled(true); }
+                if (btnHistory != null) { btnHistory.setVisibility(View.VISIBLE); btnHistory.setEnabled(true); }
+                if (btnStop != null) { btnStop.setVisibility(View.GONE); btnStop.setEnabled(false); }
+            }
+        } catch (Throwable ignored) {}
     }
 
     // Simple generation monitor helpers (keeps basic flags and timers).

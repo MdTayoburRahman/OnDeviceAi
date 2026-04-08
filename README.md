@@ -91,6 +91,22 @@ On first launch, the app redirects you to the **Model List** screen where you ca
 
 Models are downloaded from Hugging Face and stored in the app's external files directory (`<app>/models/`).
 
+### New Chat button & native session reset
+
+The app provides a New Chat action that clears the UI conversation and resets the native model session/context so the KV cache and any cached prompt tokens are discarded.
+
+- UI: a `New Chat` button is placed next to the Models button in `activity_main.xml` with id `@id/btnNewChat` and a small indeterminate `ProgressBar` with id `@id/progressResetSession` is shown while the native reset runs.
+- Native: the Java bridge calls a JNI method `LlamaBridge.resetSession()` which must be implemented in the native library. The Java declaration is present in `app/src/main/java/com/droidrocks/ondeviceai/LlamaBridge.java`.
+
+How it behaves:
+- Tap the `New Chat` button — the UI conversation clears immediately (new session id) so the user sees instant feedback.
+- A small spinner appears and the button is disabled while the native side runs `resetSession()` in a background thread.
+- When the native reset completes the spinner hides and a toast indicates success or failure.
+
+Developer notes:
+- Ensure your native `llama_jni` library exposes the JNI symbol `Java_com_droidrocks_ondeviceai_LlamaBridge_resetSession` (signature: `JNIEXPORT jboolean JNICALL ...`) so the Java bridge can call it. If the symbol is missing the app will throw UnsatisfiedLinkError when invoking the reset.
+- If you prefer a confirmation dialog before clearing a conversation, modify `MainActivity` to show an AlertDialog before calling `startNewChat()` and `resetSession()`.
+
 ### 5. (Optional) Enable Vulkan GPU acceleration
 
 1. Install the [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on your build machine.

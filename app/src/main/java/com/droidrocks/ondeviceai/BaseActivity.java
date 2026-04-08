@@ -27,21 +27,21 @@ public class BaseActivity extends AppCompatActivity {
     public void setContentView(int layoutResID) {
         super.setContentView(layoutResID);
         // Enable full screen after content view is set
-        enableFullScreen();
+      //  enableFullScreen();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         // Restore full screen mode when returning to the app
-        enableFullScreen();
+       // enableFullScreen();
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            enableFullScreen();
+         //   enableFullScreen();
         }
     }
 
