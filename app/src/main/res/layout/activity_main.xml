@@ -14,10 +14,10 @@
         android:id="@+id/headerSection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@color/primary_container"
+        android:gravity="center_vertical"
         android:orientation="vertical"
         android:padding="8dp"
-        android:gravity="center_vertical"
-        android:background="@color/primary_container"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
@@ -26,47 +26,47 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp">
 
             <ImageView
                 android:layout_width="36dp"
                 android:layout_height="36dp"
-                android:src="@drawable/ic_robot"
                 android:contentDescription="@string/content_desc_ai"
+                android:src="@drawable/ic_robot"
                 app:tint="@color/primary" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
                 android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="12dp">
+                android:orientation="vertical">
 
                 <TextView
                     android:id="@+id/textView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/app_name"
-                    android:textSize="20sp"
-                    android:textStyle="bold"
                     android:textAlignment="textEnd"
-                    android:textColor="@color/on_primary_container" />
+                    android:textColor="@color/on_primary_container"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/tvModelPath"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/model_not_loaded"
-                    android:textSize="12sp"
-                    android:textColor="@color/on_primary_container"
+                    android:layout_marginTop="2dp"
                     android:alpha="0.8"
-                    android:textAlignment="textEnd"
                     android:ellipsize="middle"
                     android:singleLine="true"
-                    android:layout_marginTop="2dp" />
+                    android:text="@string/model_not_loaded"
+                    android:textAlignment="textEnd"
+                    android:textColor="@color/on_primary_container"
+                    android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -74,55 +74,68 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-             <!-- Chat history button -->
-             <com.google.android.material.button.MaterialButton
-                 android:id="@+id/btnHistory"
-                 style="@style/Widget.Material3.Button.IconButton"
-                 android:layout_width="48dp"
-                 android:layout_height="48dp"
-                 app:icon="@drawable/ic_history"
-                 app:iconSize="24dp"
-                 app:iconTint="@color/on_primary_container"
-                 android:contentDescription="@string/btn_chat_history"
-                 android:layout_marginEnd="4dp" />
-             <!-- Clear chat button -->
-             <com.google.android.material.button.MaterialButton
-                 android:id="@+id/btnClearChat"
-                 style="@style/Widget.Material3.Button.IconButton"
-                 android:layout_width="48dp"
-                 android:layout_height="48dp"
-                 app:icon="@drawable/ic_delete"
-                 app:iconSize="24dp"
-                 app:iconTint="@color/error"
-                 android:contentDescription="@string/btn_clear_chat"
-                 android:layout_marginEnd="4dp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <!-- Chat history button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHistory"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="4dp"
+                android:contentDescription="@string/btn_chat_history"
+                android:text="@string/btn_chat_history"
+                app:icon="@drawable/ic_history"
+                app:iconSize="24dp"
+                app:iconTint="@color/on_primary_container" />
+            <!-- Clear chat button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnClearChat"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="4dp"
+                android:contentDescription="@string/btn_clear_chat"
+                android:text="@string/btn_clear_chat"
+                app:icon="@drawable/clear_all_24dp"
+                app:iconSize="24dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnModels"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
                 android:layout_height="40dp"
+                android:contentDescription="@string/btn_models"
                 android:text="@string/btn_models"
                 android:textSize="12sp"
-                app:icon="@drawable/ic_folder"
-                app:iconSize="18dp"
-                app:cornerRadius="20dp" />
+                app:cornerRadius="20dp"
+                app:icon="@drawable/automation_24dp"
+                app:iconSize="18dp" />
+
+
+            <!-- Small progress indicator shown while native resetSession() runs -->
+            <ProgressBar
+                android:id="@+id/progressResetSession"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginStart="8dp"
+                android:indeterminate="true"
+                android:visibility="gone" />
 
         </LinearLayout>
 
-          </LinearLayout>
+    </LinearLayout>
 
     <!-- Status Chips Row -->
     <HorizontalScrollView
         android:id="@+id/statusScrollView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:scrollbars="none"
+        android:clipToPadding="false"
         android:paddingHorizontal="16dp"
         android:paddingVertical="8dp"
-        android:clipToPadding="false"
+        android:scrollbars="none"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/headerSection">
@@ -137,16 +150,16 @@
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal">
 
                 <ImageView
                     android:layout_width="14dp"
                     android:layout_height="14dp"
-                    android:src="@drawable/ic_timer"
-                    android:contentDescription="@string/content_desc_timer" />
+                    android:contentDescription="@string/content_desc_timer"
+                    android:src="@drawable/ic_timer" />
 
                 <TextView
                     android:id="@+id/tvGenTimer"
@@ -154,24 +167,24 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="@string/status_timer_default"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- CPU Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal">
 
                 <ImageView
                     android:layout_width="14dp"
                     android:layout_height="14dp"
-                    android:src="@drawable/ic_cpu"
-                    android:contentDescription="@string/content_desc_cpu" />
+                    android:contentDescription="@string/content_desc_cpu"
+                    android:src="@drawable/ic_cpu" />
 
                 <TextView
                     android:id="@+id/tvSysUsage"
@@ -179,24 +192,24 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="@string/status_cpu_default"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- App RAM Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="📱"
-                    android:textSize="12sp" />
+                android:orientation="horizontal">
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:contentDescription="@string/status_ram"
+                    android:src="@drawable/ram_memory_alt_24dp"
+                    />
 
                 <TextView
                     android:id="@+id/tvAppRam"
@@ -204,24 +217,25 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="App: --"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- Device RAM Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="💾"
-                    android:textSize="12sp" />
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:contentDescription="@string/status_ram"
+                    android:src="@drawable/ram_memory_alt_24dp"
+                    />
 
                 <TextView
                     android:id="@+id/tvDeviceRam"
@@ -229,24 +243,25 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="Device: --"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- Available RAM Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="✨"
-                    android:textSize="12sp" />
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:contentDescription="@string/status_ram"
+                    android:src="@drawable/ram_memory_alt_24dp"
+                    />
 
                 <TextView
                     android:id="@+id/tvAvailableRam"
@@ -254,18 +269,18 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="Free: --"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- GPU Chip -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/status_chip_background"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal">
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -279,8 +294,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="GPU: --"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
 
             <!-- Vulkan Chip -->
@@ -303,8 +318,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="4dp"
                     android:text="Vulkan: --"
-                    android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="10sp" />
             </LinearLayout>
         </LinearLayout>
     </HorizontalScrollView>
@@ -314,8 +329,8 @@
         android:id="@+id/outputContainer"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:orientation="vertical"
         android:layout_marginTop="4dp"
+        android:orientation="vertical"
         app:layout_constraintBottom_toTopOf="@+id/inputContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -345,6 +360,7 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:visibility="gone">
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
@@ -355,11 +371,11 @@
             android:id="@+id/logContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:background="@drawable/log_panel_background"
             android:layout_marginHorizontal="8dp"
             android:layout_marginBottom="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/log_panel_background"
+            android:orientation="vertical"
             android:padding="2dp">
 
             <!-- Log Header with compound drawable -->
@@ -367,14 +383,14 @@
                 android:id="@+id/tvLogHeader"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/log_header"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="@color/log_text"
+                android:drawableStart="@drawable/ic_terminal"
+                android:drawablePadding="8dp"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="8dp"
-                android:drawableStart="@drawable/ic_terminal"
-                android:drawablePadding="8dp" />
+                android:text="@string/log_header"
+                android:textColor="@color/log_text"
+                android:textSize="12sp"
+                android:textStyle="bold" />
 
             <!-- Log Content -->
             <ScrollView
@@ -382,18 +398,18 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:paddingHorizontal="12dp"
-                android:clipToPadding="false">
+                android:clipToPadding="false"
+                android:paddingHorizontal="12dp">
 
                 <TextView
                     android:id="@+id/tvLog"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textIsSelectable="true"
-                    android:textSize="8sp"
-                    android:textColor="@color/log_text"
                     android:fontFamily="monospace"
-                    android:lineSpacingMultiplier="1.3" />
+                    android:lineSpacingMultiplier="1.3"
+                    android:textColor="@color/log_text"
+                    android:textIsSelectable="true"
+                    android:textSize="8sp" />
             </ScrollView>
         </LinearLayout>
     </LinearLayout>
@@ -403,12 +419,12 @@
         android:id="@+id/inputContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:background="@color/surface"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
         android:paddingVertical="12dp"
-        android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:elevation="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
@@ -417,47 +433,61 @@
             android:id="@+id/etPrompt"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="12dp"
             android:layout_weight="1"
-            android:hint="@string/hint_prompt"
-            android:inputType="textMultiLine|textCapSentences"
-            android:imeOptions="actionSend"
-            android:minLines="1"
-            android:maxLines="4"
             android:background="@drawable/input_background"
+            android:hint="@string/hint_prompt"
+            android:imeOptions="actionSend"
+            android:importantForAutofill="no"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="4"
+            android:minLines="1"
+            android:scrollbars="vertical"
             android:textColor="@color/on_surface"
             android:textColorHint="@color/on_surface_variant"
             android:textSize="15sp"
-            android:layout_marginEnd="12dp"
-            android:importantForAutofill="no"
-            android:scrollbars="vertical"
             tools:ignore="LabelFor" />
 
         <!-- Generate Button -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGenerate"
             style="@style/Widget.Material3.Button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:contentDescription="@string/btn_generate"
+            app:backgroundTint="@color/primary"
+            app:cornerRadius="28dp"
             app:icon="@drawable/ic_send"
             app:iconGravity="textStart"
-            app:iconPadding="0dp"
-            app:cornerRadius="28dp"
-            app:backgroundTint="@color/primary"
-            android:contentDescription="@string/btn_generate" />
+            app:iconPadding="0dp" />
 
         <!-- Stop Button (hidden by default) -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStop"
             style="@style/Widget.Material3.Button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_marginStart="3dp"
+            android:contentDescription="@string/btn_stop"
+            android:visibility="gone"
+            app:backgroundTint="@color/error"
+            app:cornerRadius="28dp"
             app:icon="@drawable/ic_stop"
             app:iconGravity="textStart"
-            app:iconPadding="0dp"
+            app:iconPadding="0dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNewChat"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_marginStart="3dp"
+            android:contentDescription="@string/btn_generate"
+            app:backgroundTint="@color/primary"
             app:cornerRadius="28dp"
-            app:backgroundTint="@color/error"
-            android:contentDescription="@string/btn_stop"
-            android:visibility="gone" />
+            app:icon="@drawable/chat_add_on_24"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
 
     </LinearLayout>
 

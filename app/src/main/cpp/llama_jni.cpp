@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <stdarg.h>
+#include <cstdarg>
 // performance core detection & thread affinity
 #include <sched.h>
 #include <unistd.h>
@@ -107,6 +107,23 @@ static uint64_t g_vulkan_device_local_mem = 0; // bytes
 
 static ggml_backend_t g_vk_backend = nullptr;
 
+// Cache of the last tokenized prompt to avoid re-decoding identical prefixes.
+// This helps reduce prompt decoding time when subsequent prompts share prefixes
+// or when the same prompt is generated repeatedly.
+static std::vector<llama_token> g_last_prompt_tokens;
+static std::mutex g_last_prompt_mutex;
+// Limit cached tokens to avoid uncontrolled memory growth
+static const size_t G_PROMPT_TOKEN_CACHE_LIMIT = 16 * 1024;
+// Session/versioning to ensure cached tokens match the active context
+static std::atomic<uint64_t> g_session_id{1};
+static uint64_t g_cached_session_id = 0; // protected by g_last_prompt_mutex
+static size_t g_last_prompt_token_count = 0; // protected by g_last_prompt_mutex
+// Store active context capacity so append/checks can validate available slots
+static int g_context_n_ctx = 2048;
+// chosen batch settings (initialized at load time)
+static int g_opt_n_batch = 0;
+static int g_opt_n_ubatch = 0;
+
 static bool try_init_vulkan() {
     VkResult r;
     VkInstance instance = VK_NULL_HANDLE;
@@ -183,6 +200,7 @@ static bool try_init_vulkan() {
     }
 
     vkDestroyInstance(instance, nullptr);
+    g_vulkan_available.store(g_vulkan_available.load());
     return g_vulkan_available.load();
 }
 
@@ -191,6 +209,8 @@ static struct llama_context * g_ctx = nullptr;
 static int g_n_threads = 1;
 // cooperative cancellation flag - set by interruptGeneration() JNI call
 static std::atomic<bool> g_stop_requested(false);
+// Path to currently loaded model file (used for reloads)
+static std::string g_model_path;
 
 // Detect ARM big.LITTLE performance (big) cores by reading cpufreq max frequency.
 // Returns the number of big cores found, and sets the current thread's CPU affinity
@@ -207,8 +227,12 @@ static int detect_and_pin_perf_cores() {
                  "/sys/devices/system/cpu/cpu%u/cpufreq/cpuinfo_max_freq", i);
         std::ifstream f(path);
         long freq = 0;
-        if (f.is_open()) { f >> freq; }
-        core_freqs.push_back({(int)i, freq});
+        if (f.is_open()) {
+            if (!(f >> freq)) {
+                freq = 0;
+            }
+        }
+        core_freqs.emplace_back((int)i, freq);
     }
 
     // Find the maximum frequency among all cores
@@ -239,7 +263,13 @@ static int detect_and_pin_perf_cores() {
     for (int c : big_cores) {
         CPU_SET(c, &mask);
     }
-    sched_setaffinity(0, sizeof(mask), &mask);
+    int rv = sched_setaffinity(0, sizeof(mask), &mask);
+    if (rv != 0) {
+        int err = errno;
+        LOGI("[llama_jni] sched_setaffinity failed: %d (%s)", err, strerror(err));
+        // fallback: return count but do not enforce affinity
+        return (int)big_cores.size();
+    }
 
     return (int)big_cores.size();
 }
@@ -251,6 +281,16 @@ static int detect_default_n_threads() {
     const unsigned int MAX_THREADS = 8;
     unsigned int pick = std::min(hw, MAX_THREADS);
     return (int) pick;
+}
+
+// Utility: compute length of common prefix of two token vectors
+static int common_prefix_tokens(const std::vector<llama_token> &a, const std::vector<llama_token> &b) {
+    size_t n = std::min(a.size(), b.size());
+    size_t i = 0;
+    for (; i < n; ++i) {
+        if (a[i] != b[i]) break;
+    }
+    return (int)i;
 }
 
 extern "C"
@@ -284,71 +324,26 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     // clear any previous stop request
     g_stop_requested.store(false);
 
-    // ── Step 1: Probe Vulkan BEFORE loading the model so GPU can be used ──
-    if (!g_vulkan_available.load()) {
-        LOGI("[llama_jni] Probing Vulkan GPU availability...");
-        if (try_init_vulkan()) {
-            LOGI("[llama_jni] Vulkan GPU available: %s", g_vulkan_device_name.c_str());
-            LOGI("[llama_jni] Vulkan VRAM: %llu MB",
-                 (unsigned long long)(g_vulkan_device_local_mem / (1024 * 1024)));
-        } else {
-            LOGI("[llama_jni] Vulkan not available, using CPU-only mode");
-        }
-    }
-
-    // ── Step 2: Load ggml backends (Vulkan, etc.) ──
-    LOGI("[llama_jni] Loading ggml backends...");
-    ggml_backend_load_all();
-    LOGI("[llama_jni] ggml backends loaded");
+    // Defer Vulkan probe and heavy backend initialization from the critical
+    // load path to reduce time-to-ready. The app can call initVulkanBackend()
+    // explicitly later; for now proceed with CPU-only model load which is the
+    // lowest-latency path on many Android devices.
+    LOGI("[llama_jni] Vulkan/backend probe deferred to initVulkanBackend() to reduce load latency");
 
     // ── Step 3: Prepare model params with GPU offloading ──
     struct llama_model_params mparams = llama_model_default_params();
     mparams.use_mmap = true;    // memory-map the model for faster loading
 
-    // Log all available ggml devices for diagnostics
-    {
-        size_t dev_count = ggml_backend_dev_count();
-        LOGI("[llama_jni] ggml devices found: %zu", dev_count);
-        for (size_t i = 0; i < dev_count; ++i) {
-            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
-            const char * dname = ggml_backend_dev_name(dev);
-            ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
-            const char * rname = reg ? ggml_backend_reg_name(reg) : "null";
-            int dtype = (int)ggml_backend_dev_type(dev);
-            LOGI("[llama_jni]   device[%zu]: name=%s reg=%s type=%d (0=CPU,1=GPU)", i, dname ? dname : "?", rname ? rname : "?", dtype);
-        }
-    }
-
-    // Select GPU device if available (any GPU, not just "vulkan"-named)
-    ggml_backend_dev_t * devs_alloc = nullptr;
-    {
-        size_t dev_count = ggml_backend_dev_count();
-        ggml_backend_dev_t chosen = nullptr;
-        for (size_t i = 0; i < dev_count; ++i) {
-            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
-            if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
-                chosen = dev;
-                const char * dname = ggml_backend_dev_name(dev);
-                LOGI("[llama_jni] Selected GPU device: %s", dname ? dname : "unknown");
-                break;
-            }
-        }
-        if (chosen) {
-            devs_alloc = (ggml_backend_dev_t *) malloc(sizeof(ggml_backend_dev_t) * 2);
-            if (devs_alloc) {
-                devs_alloc[0] = chosen;
-                devs_alloc[1] = nullptr;
-                mparams.devices = devs_alloc;
-            }
-        } else {
-            LOGI("[llama_jni] No GPU device found — using CPU only");
-        }
-    }
+    // CPU-first loadModel: we intentionally avoid probing or selecting GPU
+    // devices here to keep model load latency low on Android. GPU/backends
+    // may be enabled later via enableGpuBackendAsync() or initVulkanBackend().
+    mparams.devices = nullptr; // ensure CPU-only load
 
     // ── Step 4: Load model file ──
     g_model = llama_model_load_from_file(path.c_str(), mparams);
 
-    if (devs_alloc) { free(devs_alloc); devs_alloc = nullptr; mparams.devices = nullptr; }
+    // store model path for potential GPU-reload later
+    g_model_path = path;
 
     if (!g_model) {
         LOGE("[llama_jni] ERROR: Failed to load model file!");
@@ -380,13 +375,36 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     } else {
         g_n_threads = detect_and_pin_perf_cores();
     }
+    // Cap thread use to avoid excessive parallelism on mobile which can hurt
+    // latency due to scheduling and memory bandwidth contention.
+    const int MAX_MOBILE_THREADS = 4;
+    if (g_n_threads > MAX_MOBILE_THREADS) {
+        LOGI("[llama_jni] Capping threads from %d to %d for mobile latency reasons", g_n_threads, MAX_MOBILE_THREADS);
+        g_n_threads = MAX_MOBILE_THREADS;
+    }
     LOGI("[llama_jni] Threads: %d (pinned to perf cores, CPU hw_concurrency: %u)",
          g_n_threads, std::thread::hardware_concurrency());
 
     cparams.n_threads       = g_n_threads;
     cparams.n_threads_batch = g_n_threads;
-    cparams.n_batch  = 512;   // larger batch = faster prompt processing
-    cparams.n_ubatch = 512;
+
+    // Tune batching for Android devices. Very large batch sizes can increase
+    // latency for the first token because they force the runtime to assemble
+    // huge work units before producing any output. Use conservative values
+    // adapted to the detected thread count.
+    if (g_n_threads <= 2) {
+        cparams.n_batch = 64;
+        cparams.n_ubatch = 64;
+    } else if (g_n_threads <= 4) {
+        cparams.n_batch = 128;
+        cparams.n_ubatch = 128;
+    } else {
+        cparams.n_batch = 256;
+        cparams.n_ubatch = 256;
+    }
+    // store chosen batch settings for later retrieval/adaptive tuning
+    g_opt_n_batch = cparams.n_batch;
+    g_opt_n_ubatch = cparams.n_ubatch;
 
     // ── KEY SPEED OPTIMIZATIONS ──
 
@@ -424,9 +442,144 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_loadModel(
     llama_set_n_threads(g_ctx, g_n_threads, g_n_threads);
     llama_set_warmup(g_ctx, true);
 
+    // Store active context capacity and bump session id so any cached token
+    // lists that belonged to a previous session are invalidated.
+    g_context_n_ctx = (int)cparams.n_ctx;
+    g_session_id.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        g_last_prompt_tokens.clear();
+        g_cached_session_id = g_session_id.load();
+        g_last_prompt_token_count = 0;
+    }
 
-    LOGI("[llama_jni] === MODEL READY ===");
+    LOGI("[llama_jni] === MODEL READY === (n_ctx=%d)", g_context_n_ctx);
     return JNI_TRUE;
+}
+
+// Append prompt tokens directly into the active context. Useful for incremental
+// prompt feeding from the Java side to avoid re-tokenizing or rebuilding the
+// whole prompt in one shot. Returns JNI_TRUE on success.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_appendPromptTokens(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jstring prompt) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_ctx || !g_model) return JNI_FALSE;
+
+    const char *promptChars = env->GetStringUTFChars(prompt, nullptr);
+    std::string input = promptChars ? promptChars : "";
+    env->ReleaseStringUTFChars(prompt, promptChars);
+
+    const struct llama_vocab * vocab = llama_model_get_vocab(g_model);
+    if (!vocab) return JNI_FALSE;
+
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    llama_pos mem_pos_max = llama_memory_seq_pos_max(mem, 0);
+    bool is_first = (mem_pos_max == -1);
+
+    const int max_prompt_tokens = 4096;
+    std::vector<llama_token> prompt_tokens_buf(max_prompt_tokens);
+    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(),
+                                       prompt_tokens_buf.data(), (int32_t) prompt_tokens_buf.size(), is_first, false);
+    if (n_prompt <= 0) return JNI_FALSE;
+
+    std::vector<llama_token> prompt_tokens(prompt_tokens_buf.begin(), prompt_tokens_buf.begin() + n_prompt);
+
+    llama_pos base_pos = is_first ? 0 : mem_pos_max + 1;
+
+    // Check available context slots
+    int used = (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1);
+    int free_slots = g_context_n_ctx - used;
+    if (free_slots <= 0) {
+        LOGE("[llama_jni] appendPromptTokens: no free context slots");
+        return JNI_FALSE;
+    }
+    if (n_prompt > free_slots) {
+        LOGE("[llama_jni] appendPromptTokens: prompt (%d tokens) exceeds free slots (%d)", n_prompt, free_slots);
+        return JNI_FALSE;
+    }
+
+    // Chunk large fragments to reduce single-call latency
+    const int CHUNK_SIZE = 128;
+    int processed = 0;
+    while (processed < n_prompt) {
+        int this_chunk = std::min(CHUNK_SIZE, n_prompt - processed);
+        struct llama_batch batch = llama_batch_init(this_chunk, 0, 1);
+        if (!batch.token) return JNI_FALSE;
+        for (int i = 0; i < this_chunk; ++i) {
+            batch.token[i] = prompt_tokens[processed + i];
+            batch.logits[i] = (processed + i == n_prompt - 1) ? 1 : 0;
+        }
+        batch.n_tokens = this_chunk;
+        if (batch.pos) for (int i = 0; i < this_chunk; ++i) batch.pos[i] = base_pos + processed + i;
+        if (batch.n_seq_id) for (int i = 0; i < this_chunk; ++i) batch.n_seq_id[i] = 1;
+        if (batch.seq_id) for (int i = 0; i < this_chunk; ++i) { if (batch.seq_id[i]) batch.seq_id[i][0] = 0; }
+
+        int32_t res = llama_decode(g_ctx, batch);
+        llama_batch_free(batch);
+        if (res != 0) {
+            LOGE("[llama_jni] appendPromptTokens: llama_decode failed for chunk at %d (res=%d)", processed, res);
+            return JNI_FALSE;
+        }
+        processed += this_chunk;
+    }
+
+    // Update cache: append new tokens, bounded
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        if (g_last_prompt_tokens.size() + (size_t)n_prompt > G_PROMPT_TOKEN_CACHE_LIMIT) {
+            // keep the tail of tokens that fit
+            size_t keep = G_PROMPT_TOKEN_CACHE_LIMIT > (size_t)n_prompt ? G_PROMPT_TOKEN_CACHE_LIMIT - (size_t)n_prompt : 0;
+            std::vector<llama_token> newcache;
+            if (keep > 0 && g_last_prompt_tokens.size() > keep) {
+                newcache.insert(newcache.end(), g_last_prompt_tokens.end() - keep, g_last_prompt_tokens.end());
+            }
+            newcache.insert(newcache.end(), prompt_tokens.begin(), prompt_tokens.end());
+            g_last_prompt_tokens.swap(newcache);
+        } else {
+            g_last_prompt_tokens.insert(g_last_prompt_tokens.end(), prompt_tokens.begin(), prompt_tokens.end());
+        }
+        g_last_prompt_token_count = g_last_prompt_tokens.size();
+        g_cached_session_id = g_session_id.load();
+    }
+
+    return JNI_TRUE;
+}
+
+// Pretokenize a prompt and return the token ids as a Java int[] (jintArray).
+// Useful for Java-side inspection or incremental streaming where tokens are
+// prepared on the Java side before being sent to appendPromptTokens.
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_pretokenizePrompt(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jstring prompt) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_ctx || !g_model) return nullptr;
+
+    const char *promptChars = env->GetStringUTFChars(prompt, nullptr);
+    std::string input = promptChars ? promptChars : "";
+    env->ReleaseStringUTFChars(prompt, promptChars);
+
+    const struct llama_vocab * vocab = llama_model_get_vocab(g_model);
+    if (!vocab) return nullptr;
+
+    const int max_prompt_tokens = 4096;
+    std::vector<llama_token> prompt_tokens_buf(max_prompt_tokens);
+    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(),
+                                       prompt_tokens_buf.data(), (int32_t) prompt_tokens_buf.size(), true, false);
+    if (n_prompt <= 0) return nullptr;
+
+    jintArray out = env->NewIntArray(n_prompt);
+    if (!out) return nullptr;
+    std::vector<jint> tmp(n_prompt);
+    for (int i = 0; i < n_prompt; ++i) tmp[i] = (jint)prompt_tokens_buf[i];
+    env->SetIntArrayRegion(out, 0, n_prompt, tmp.data());
+    return out;
 }
 
 extern "C"
@@ -452,8 +605,17 @@ JNIEXPORT jboolean JNICALL
 Java_com_droidrocks_ondeviceai_LlamaBridge_initVulkanBackend(
         JNIEnv *env,
         jobject /* thiz */) {
-    if (!g_vulkan_available.load()) return JNI_FALSE;
-    // ensure backends loaded
+    // Try to detect Vulkan at the Vulkan API level first (may set g_vulkan_available)
+    if (!g_vulkan_available.load()) {
+        LOGI("[llama_jni] initVulkanBackend: probing Vulkan via try_init_vulkan()...");
+        try_init_vulkan();
+        if (!g_vulkan_available.load()) {
+            LOGI("[llama_jni] initVulkanBackend: try_init_vulkan did not find a usable Vulkan device");
+            // We'll still attempt to load ggml backends and see if any GPU backend (vulkan) is available
+        }
+    }
+
+    // Ensure ggml backends are loaded so we can enumerate available device backends
     ggml_backend_load_all();
 
     size_t dev_count = ggml_backend_dev_count();
@@ -462,25 +624,306 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_initVulkanBackend(
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
             ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
-            const char * regname = ggml_backend_reg_name(reg);
+            const char * regname = reg ? ggml_backend_reg_name(reg) : nullptr;
             if (regname && strcmp(regname, "vulkan") == 0) {
                 chosen = dev;
                 break;
             }
+            // fallback to any GPU backend if Vulkan wasn't found yet
+            if (!chosen) chosen = dev;
         }
     }
+
     if (!chosen) {
-        LOGI("[llama_jni] initVulkanBackend: no ggml Vulkan device found");
+        LOGI("[llama_jni] initVulkanBackend: no ggml GPU backend found");
         return JNI_FALSE;
     }
 
     // initialize backend for chosen device
     g_vk_backend = ggml_backend_dev_init(chosen, nullptr);
     if (!g_vk_backend) {
-        LOGE("[llama_jni] ggml_backend_dev_init failed for Vulkan device");
+        LOGE("[llama_jni] ggml_backend_dev_init failed for chosen GPU device");
         return JNI_FALSE;
     }
-    LOGI("[llama_jni] ggml Vulkan backend initialized");
+
+    // Mark Vulkan available if chosen backend is Vulkan (and Vulkan API probe succeeded earlier)
+    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(chosen);
+    const char * regname = reg ? ggml_backend_reg_name(reg) : nullptr;
+    if (regname && strcmp(regname, "vulkan") == 0) {
+        // try_init_vulkan may have already filled device properties; if not, attempt quickly
+        if (!g_vulkan_available.load()) try_init_vulkan();
+    }
+
+    LOGI("[llama_jni] ggml GPU backend initialized: reg=%s", regname ? regname : "unknown");
+    return JNI_TRUE;
+}
+
+// Return GPU status enum: 0=DISABLED, 1=AVAILABLE (but not enabled), 2=ENABLED
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_isGpuEnabled(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    if (g_vk_backend != nullptr) return 2;
+    // if Vulkan API reported available or ggml has GPU backends loaded, mark available
+    if (g_vulkan_available.load()) return 1;
+    // try to see if ggml backends expose GPUs (non-blocking)
+    size_t dev_count = ggml_backend_dev_count();
+    for (size_t i = 0; i < dev_count; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) return 1;
+    }
+    return 0;
+}
+
+// Return optimal batch settings chosen at load time as an int[2] {n_batch, n_ubatch}
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_getOptimalBatchSettings(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    jintArray out = env->NewIntArray(2);
+    if (!out) return nullptr;
+    jint tmp[2]; tmp[0] = (jint) g_opt_n_batch; tmp[1] = (jint) g_opt_n_ubatch;
+    env->SetIntArrayRegion(out, 0, 2, tmp);
+    return out;
+}
+
+// Asynchronously enable GPU backend by loading ggml backends, selecting a GPU,
+// reloading the model with device mapping, creating a GPU-enabled context and
+// atomically swapping it in. Returns JNI_TRUE if the background task started.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_enableGpuBackendAsync(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jlong freeBytes,
+        jobject callback) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_model || g_model_path.empty()) {
+        LOGE("[llama_jni] enableGpuBackendAsync: no model loaded");
+        return JNI_FALSE;
+    }
+
+    // Low-memory guard: if freeBytes is provided and below threshold, skip
+    const jlong MIN_FREE_BYTES = (jlong)(150 * 1024 * 1024); // 150MB heuristic
+    if (freeBytes > 0 && freeBytes < MIN_FREE_BYTES) {
+        LOGI("[llama_jni] enableGpuBackendAsync: skipping GPU reload due to low free memory: %lld bytes", (long long) freeBytes);
+        return JNI_FALSE;
+    }
+
+    // Launch background thread to perform the heavy work
+    // Create a global ref to callback if provided (we'll call methods on it)
+    jobject g_callback = nullptr;
+    if (callback) {
+        g_callback = env->NewGlobalRef(callback);
+    }
+
+    std::thread([path = g_model_path, g_callback]() {
+        LOGI("[llama_jni] GPU reload: background init started");
+
+        auto call_progress = [&](int pct) {
+            if (!g_callback) return;
+            JavaVM *jvm = g_jvm; JNIEnv *env = nullptr;
+            if (jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                jclass cbCls = env->GetObjectClass(g_callback);
+                if (cbCls) {
+                    jmethodID onProgress = env->GetMethodID(cbCls, "onProgress", "(I)V");
+                    if (onProgress) env->CallVoidMethod(g_callback, onProgress, (jint)pct);
+                }
+                jvm->DetachCurrentThread();
+            }
+        };
+
+        // Snapshot cached prompt tokens so we can replay them into new context
+        std::vector<llama_token> cached_tokens;
+        {
+            std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+            cached_tokens = g_last_prompt_tokens;
+        }
+        if (cached_tokens.size() > (size_t)g_context_n_ctx) {
+            // keep only last n_ctx tokens
+            cached_tokens.erase(cached_tokens.begin(), cached_tokens.end() - g_context_n_ctx);
+        }
+
+        // Load backends (may be slow)
+        ggml_backend_load_all();
+        call_progress(20);
+
+        // Find a GPU device (prefer vulkan)
+        size_t dev_count = ggml_backend_dev_count();
+        ggml_backend_dev_t chosen = nullptr;
+        for (size_t i = 0; i < dev_count; ++i) {
+            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+            if (ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+                ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+                const char * regname = reg ? ggml_backend_reg_name(reg) : nullptr;
+                if (regname && strcmp(regname, "vulkan") == 0) { chosen = dev; break; }
+                if (!chosen) chosen = dev; // fallback to any GPU
+            }
+        }
+
+        if (!chosen) {
+            LOGI("[llama_jni] GPU reload: no GPU devices available");
+            // notify callback if present
+            if (g_callback) {
+                JavaVM *jvm = g_jvm;
+                JNIEnv *env = nullptr;
+                if (jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                    jclass cbCls = env->GetObjectClass(g_callback);
+                    if (cbCls) {
+                        jmethodID onComplete = env->GetMethodID(cbCls, "onComplete", "(Z)V");
+                        if (onComplete) env->CallVoidMethod(g_callback, onComplete, JNI_FALSE);
+                    }
+                    env->DeleteGlobalRef(g_callback);
+                    jvm->DetachCurrentThread();
+                }
+            }
+            return;
+        }
+
+        // Allocate device array for model load
+        ggml_backend_dev_t * devs_alloc = (ggml_backend_dev_t *) malloc(sizeof(ggml_backend_dev_t) * 2);
+        if (!devs_alloc) {
+            LOGE("[llama_jni] GPU reload: failed to allocate devs array");
+            return;
+        }
+        devs_alloc[0] = chosen;
+        devs_alloc[1] = nullptr;
+
+        // Prepare model load params to attach device mapping
+        struct llama_model_params mparams = llama_model_default_params();
+        mparams.use_mmap = true;
+        mparams.devices = devs_alloc;
+
+        LOGI("[llama_jni] GPU reload: loading model with GPU device mapping (this may be slow)");
+        call_progress(50);
+        struct llama_model * new_model = llama_model_load_from_file(path.c_str(), mparams);
+        if (!new_model) {
+            LOGE("[llama_jni] GPU reload: failed to reload model with GPU mapping");
+            free(devs_alloc);
+            if (g_callback) {
+                JavaVM *jvm = g_jvm;
+                JNIEnv *env = nullptr;
+                if (jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                    jclass cbCls = env->GetObjectClass(g_callback);
+                    if (cbCls) {
+                        jmethodID onComplete = env->GetMethodID(cbCls, "onComplete", "(Z)V");
+                        if (onComplete) env->CallVoidMethod(g_callback, onComplete, JNI_FALSE);
+                    }
+                    env->DeleteGlobalRef(g_callback);
+                    jvm->DetachCurrentThread();
+                }
+            }
+            return;
+        }
+
+        // Create context params with offload enabled
+        struct llama_context_params cparams = llama_context_default_params();
+        cparams.n_ctx = (uint32_t) g_context_n_ctx;
+        // threading: reuse existing recommendation
+        int threads = g_n_threads > 0 ? g_n_threads : detect_default_n_threads();
+        cparams.n_threads = threads;
+        cparams.n_threads_batch = threads;
+        if (threads <= 2) { cparams.n_batch = 64; cparams.n_ubatch = 64; }
+        else if (threads <= 4) { cparams.n_batch = 128; cparams.n_ubatch = 128; }
+        else { cparams.n_batch = 256; cparams.n_ubatch = 256; }
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        cparams.type_k = GGML_TYPE_Q8_0;
+        cparams.type_v = GGML_TYPE_Q8_0;
+        cparams.offload_kqv = true;
+        cparams.op_offload = true;
+        cparams.abort_callback = [](void * /*data*/) -> bool { return g_stop_requested.load(std::memory_order_relaxed); };
+
+        LOGI("[llama_jni] GPU reload: creating GPU-enabled context (this may be slow)");
+        call_progress(80);
+        struct llama_context * new_ctx = llama_init_from_model(new_model, cparams);
+        if (!new_ctx) {
+            LOGE("[llama_jni] GPU reload: failed to create context with GPU offload");
+            llama_model_free(new_model);
+            free(devs_alloc);
+            if (g_callback) {
+                JavaVM *jvm = g_jvm; JNIEnv *env = nullptr;
+                if (jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                    jclass cbCls = env->GetObjectClass(g_callback);
+                    if (cbCls) {
+                        jmethodID onComplete = env->GetMethodID(cbCls, "onComplete", "(Z)V");
+                        if (onComplete) env->CallVoidMethod(g_callback, onComplete, JNI_FALSE);
+                    }
+                    env->DeleteGlobalRef(g_callback);
+                    jvm->DetachCurrentThread();
+                }
+            }
+            return;
+        }
+
+        // initialize backend for chosen device (store handle)
+        ggml_backend_t new_vk_backend = ggml_backend_dev_init(chosen, nullptr);
+
+        // Replay cached tokens into the new context to preserve session state
+        if (!cached_tokens.empty()) {
+            LOGI("[llama_jni] GPU reload: replaying %zu cached tokens into new context", cached_tokens.size());
+            int processed = 0;
+            const int CHUNK = 128;
+            while (processed < (int)cached_tokens.size()) {
+                int this_chunk = std::min(CHUNK, (int)cached_tokens.size() - processed);
+                struct llama_batch batch = llama_batch_init(this_chunk, 0, 1);
+                if (!batch.token) { LOGE("[llama_jni] GPU reload: failed to alloc batch for replay"); break; }
+                for (int i = 0; i < this_chunk; ++i) {
+                    batch.token[i] = cached_tokens[processed + i];
+                    batch.logits[i] = (processed + i == (int)cached_tokens.size() - 1) ? 1 : 0;
+                }
+                batch.n_tokens = this_chunk;
+                if (batch.pos) for (int i = 0; i < this_chunk; ++i) batch.pos[i] = processed + i;
+                int32_t r = llama_decode(new_ctx, batch);
+                llama_batch_free(batch);
+                if (r != 0) { LOGE("[llama_jni] GPU reload: replay decode failed (r=%d)", r); break; }
+                processed += this_chunk;
+            }
+        }
+
+        // Swap in new model/context atomically
+        struct llama_model * old_model = nullptr;
+        struct llama_context * old_ctx = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            old_model = g_model;
+            old_ctx = g_ctx;
+            g_model = new_model;
+            g_ctx = new_ctx;
+            g_vk_backend = new_vk_backend;
+            // bump session and clear cache
+            g_session_id.fetch_add(1);
+            {
+                std::lock_guard<std::mutex> lock2(g_last_prompt_mutex);
+                g_last_prompt_tokens.clear();
+                g_last_prompt_token_count = 0;
+                g_cached_session_id = g_session_id.load();
+            }
+        }
+
+        // free old context/model outside lock
+        if (old_ctx) llama_free(old_ctx);
+        if (old_model) llama_model_free(old_model);
+        free(devs_alloc);
+
+        LOGI("[llama_jni] GPU reload: successfully swapped in GPU-enabled context");
+        call_progress(100);
+        // notify callback success
+        if (g_callback) {
+            JavaVM *jvm = g_jvm; JNIEnv *env = nullptr;
+            if (jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                jclass cbCls = env->GetObjectClass(g_callback);
+                if (cbCls) {
+                    jmethodID onComplete = env->GetMethodID(cbCls, "onComplete", "(Z)V");
+                    if (onComplete) env->CallVoidMethod(g_callback, onComplete, JNI_TRUE);
+                }
+                env->DeleteGlobalRef(g_callback);
+                jvm->DetachCurrentThread();
+            }
+        }
+    }).detach();
+
     return JNI_TRUE;
 }
 
@@ -499,6 +942,93 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_getVulkanDeviceLocalMemory(
         JNIEnv *env,
         jobject /* thiz */) {
     return (jlong) g_vulkan_device_local_mem;
+}
+
+// Trim context to keep only the last `keepTokens` tokens. Recreates context and
+// re-appends recent tokens from the cache. Returns JNI_TRUE on success.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_trimContextTo(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jint keepTokens) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_model) return JNI_FALSE;
+    if (keepTokens <= 0) return JNI_FALSE;
+
+    // gather last tokens from cache
+    std::vector<llama_token> tokens;
+    {
+        std::lock_guard<std::mutex> lock2(g_last_prompt_mutex);
+        if (!g_last_prompt_tokens.empty()) {
+            if ((int)g_last_prompt_tokens.size() > keepTokens) {
+                tokens.assign(g_last_prompt_tokens.end() - keepTokens, g_last_prompt_tokens.end());
+            } else {
+                tokens = g_last_prompt_tokens;
+            }
+        }
+    }
+
+    // create new context
+    struct llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx = (uint32_t) g_context_n_ctx;
+    cparams.n_threads = g_n_threads;
+    cparams.n_threads_batch = g_n_threads;
+    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    cparams.type_k = GGML_TYPE_Q8_0;
+    cparams.type_v = GGML_TYPE_Q8_0;
+    // preserve offload setting if GPU backend enabled
+    cparams.offload_kqv = (g_vk_backend != nullptr);
+    cparams.op_offload = (g_vk_backend != nullptr);
+    cparams.abort_callback = [](void * /*data*/) -> bool { return g_stop_requested.load(std::memory_order_relaxed); };
+
+    struct llama_context * new_ctx = llama_init_from_model(g_model, cparams);
+    if (!new_ctx) {
+        LOGE("[llama_jni] trimContextTo: failed to create new context");
+        return JNI_FALSE;
+    }
+
+    // replay tokens if any
+    if (!tokens.empty()) {
+        int processed = 0;
+        const int CHUNK = 128;
+        while (processed < (int)tokens.size()) {
+            int this_chunk = std::min(CHUNK, (int)tokens.size() - processed);
+            struct llama_batch batch = llama_batch_init(this_chunk, 0, 1);
+            if (!batch.token) { LOGE("[llama_jni] trimContextTo: failed to alloc batch"); break; }
+            for (int i = 0; i < this_chunk; ++i) {
+                batch.token[i] = tokens[processed + i];
+                batch.logits[i] = (processed + i == (int)tokens.size() - 1) ? 1 : 0;
+            }
+            batch.n_tokens = this_chunk;
+            if (batch.pos) for (int i = 0; i < this_chunk; ++i) batch.pos[i] = processed + i;
+            int32_t r = llama_decode(new_ctx, batch);
+            llama_batch_free(batch);
+            if (r != 0) { LOGE("[llama_jni] trimContextTo: replay decode failed (r=%d)", r); break; }
+            processed += this_chunk;
+        }
+    }
+
+    // swap contexts
+    struct llama_context * old_ctx = g_ctx;
+    g_ctx = new_ctx;
+    if (old_ctx) llama_free(old_ctx);
+
+    // update session and cache to reflect trimmed state
+    g_session_id.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock2(g_last_prompt_mutex);
+        if ((int)tokens.size() > keepTokens) {
+            g_last_prompt_tokens.assign(tokens.end() - keepTokens, tokens.end());
+        } else {
+            g_last_prompt_tokens = tokens;
+        }
+        g_last_prompt_token_count = g_last_prompt_tokens.size();
+        g_cached_session_id = g_session_id.load();
+    }
+
+    LOGI("[llama_jni] trimContextTo: kept %d tokens", (int)g_last_prompt_token_count);
+    return JNI_TRUE;
 }
 
 extern "C"
@@ -535,61 +1065,102 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
 
     // Tokenize prompt
     const int max_prompt_tokens = 4096;
-    std::vector<llama_token> prompt_tokens(max_prompt_tokens);
-    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(), prompt_tokens.data(), (int32_t) prompt_tokens.size(), is_first, false);
+    std::vector<llama_token> prompt_tokens_buf(max_prompt_tokens);
+    int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(), prompt_tokens_buf.data(), (int32_t) prompt_tokens_buf.size(), is_first, false);
     if (n_prompt <= 0) {
         LOGE("[llama_jni] tokenization failed or returned %d", n_prompt);
         return env->NewStringUTF("Tokenization failed.");
     }
 
+    std::vector<llama_token> prompt_tokens(prompt_tokens_buf.begin(), prompt_tokens_buf.begin() + n_prompt);
+
     // base position to place the prompt tokens in the context memory
     llama_pos base_pos = is_first ? 0 : mem_pos_max + 1;
 
-    // Evaluate prompt using batch API
-    struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
-    if (!batch.token) {
-        LOGE("[llama_jni] failed to init batch for prompt");
-        return env->NewStringUTF("Batch init failed.");
-    }
-    for (int i = 0; i < n_prompt; ++i) {
-        batch.token[i]   = prompt_tokens[i];
-        batch.logits[i]  = (i == n_prompt - 1) ? 1 : 0;
-    }
-    batch.n_tokens = n_prompt;
-
-    // initialize the per-token metadata
-    if (batch.pos) {
-        for (int i = 0; i < n_prompt; ++i) {
-            batch.pos[i] = base_pos + i;
-        }
-    }
-    if (batch.n_seq_id) {
-        for (int i = 0; i < n_prompt; ++i) {
-            batch.n_seq_id[i] = 1;
-        }
-    }
-    if (batch.seq_id) {
-        for (int i = 0; i < n_prompt; ++i) {
-            if (batch.seq_id[i]) {
-                batch.seq_id[i][0] = 0;
+    // Determine how many tokens are already present in the context by comparing
+    // with the cached last prompt tokenization. We will only decode the delta
+    // tokens to avoid re-processing large identical prefixes.
+    int start_index = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        // Only use cache if it belongs to the current session
+        if (g_cached_session_id == g_session_id.load() && !g_last_prompt_tokens.empty()) {
+            int common = common_prefix_tokens(prompt_tokens, g_last_prompt_tokens);
+            int tokens_in_ctx = (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1);
+            // Don't assume tokens beyond what the runtime already contains or what we recorded
+            if (g_last_prompt_token_count <= (size_t)tokens_in_ctx) {
+                start_index = std::min(common, tokens_in_ctx);
+            } else {
+                // cached token count doesn't match context; invalidate cache
+                g_last_prompt_tokens.clear();
+                g_last_prompt_token_count = 0;
+                g_cached_session_id = g_session_id.load();
             }
         }
     }
 
-    if (g_stop_requested.load()) {
+    int32_t res = 0;
+    int64_t t_start = llama_time_us();
+    int64_t t_prompt_done = t_start;
+
+    if (start_index < n_prompt) {
+        // Only decode the remaining tokens after start_index
+        int delta = n_prompt - start_index;
+        struct llama_batch batch = llama_batch_init(delta, 0, 1);
+        if (!batch.token) {
+            LOGE("[llama_jni] failed to init batch for prompt");
+            return env->NewStringUTF("Batch init failed.");
+        }
+        for (int i = start_index; i < n_prompt; ++i) {
+            batch.token[i - start_index] = prompt_tokens[i];
+            batch.logits[i - start_index] = (i == n_prompt - 1) ? 1 : 0;
+        }
+        batch.n_tokens = delta;
+
+        // initialize the per-token metadata
+        if (batch.pos) {
+            for (int i = 0; i < delta; ++i) {
+                batch.pos[i] = base_pos + start_index + i;
+            }
+        }
+        if (batch.n_seq_id) {
+            for (int i = 0; i < delta; ++i) {
+                batch.n_seq_id[i] = 1;
+            }
+        }
+        if (batch.seq_id) {
+            for (int i = 0; i < delta; ++i) {
+                if (batch.seq_id[i]) batch.seq_id[i][0] = 0;
+            }
+        }
+
+        if (g_stop_requested.load()) {
+            llama_batch_free(batch);
+            return env->NewStringUTF("[Generation cancelled]");
+        }
+
+        res = llama_decode(g_ctx, batch);
+        t_prompt_done = llama_time_us();
         llama_batch_free(batch);
-        return env->NewStringUTF("[Generation cancelled]");
+
+        if (res != 0) {
+            LOGE("[llama_jni] llama_decode returned %d", res);
+            if (res == 1) LOGE("[llama_jni] could not find KV slot (try reducing context)");
+            return env->NewStringUTF("Evaluation failed.");
+        }
+    } else {
+        // Nothing to do: prompt tokens already in context
+        t_prompt_done = llama_time_us();
+        LOGI("[llama_jni] prompt tokens already present in context - skipping decode");
     }
 
-    int64_t t_start = llama_time_us();
-    int32_t res = llama_decode(g_ctx, batch);
-    int64_t t_prompt_done = llama_time_us();
-    llama_batch_free(batch);
-
-    if (res != 0) {
-        LOGE("[llama_jni] llama_decode returned %d", res);
-        if (res == 1) LOGE("[llama_jni] could not find KV slot (try reducing context)");
-        return env->NewStringUTF("Evaluation failed.");
+    // Update cached tokenization for next call (bounded) and tag with session id
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        g_last_prompt_tokens = prompt_tokens;
+        if (g_last_prompt_tokens.size() > G_PROMPT_TOKEN_CACHE_LIMIT) g_last_prompt_tokens.resize(G_PROMPT_TOKEN_CACHE_LIMIT);
+        g_last_prompt_token_count = g_last_prompt_tokens.size();
+        g_cached_session_id = g_session_id.load();
     }
 
     std::string output;
@@ -671,6 +1242,55 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generate(
     return env->NewStringUTF(output.c_str());
 }
 
+// Reset the current session/context while keeping the model loaded.
+// Re-creates g_ctx with the same n_ctx and thread settings. Returns JNI_TRUE on success.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_resetSession(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_model) return JNI_FALSE;
+
+    if (g_ctx) {
+        llama_free(g_ctx);
+        g_ctx = nullptr;
+    }
+
+    struct llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx = (uint32_t) g_context_n_ctx;
+    cparams.n_threads = g_n_threads;
+    cparams.n_threads_batch = g_n_threads;
+    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    cparams.type_k = GGML_TYPE_Q8_0;
+    cparams.type_v = GGML_TYPE_Q8_0;
+    cparams.offload_kqv = false; // start CPU-only for reset to be fast
+    cparams.op_offload = false;
+    cparams.abort_callback = [](void * /*data*/) -> bool { return g_stop_requested.load(std::memory_order_relaxed); };
+
+    g_ctx = llama_init_from_model(g_model, cparams);
+    if (!g_ctx) {
+        LOGE("[llama_jni] resetSession: failed to re-create context");
+        return JNI_FALSE;
+    }
+
+    // update thread and warmup
+    llama_set_n_threads(g_ctx, g_n_threads, g_n_threads);
+    llama_set_warmup(g_ctx, true);
+
+    // bump session id and clear token cache
+    g_session_id.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        g_last_prompt_tokens.clear();
+        g_last_prompt_token_count = 0;
+        g_cached_session_id = g_session_id.load();
+    }
+
+    LOGI("[llama_jni] resetSession: context recreated (n_ctx=%d)", g_context_n_ctx);
+    return JNI_TRUE;
+}
+
 // ── Streaming generation: calls Java callback.onToken(String) per token ──
 extern "C"
 JNIEXPORT jstring JNICALL
@@ -712,36 +1332,74 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
     bool is_first = (mem_pos_max == -1);
 
     const int max_prompt_tokens = 4096;
-    std::vector<llama_token> prompt_tokens(max_prompt_tokens);
+    std::vector<llama_token> prompt_tokens_buf(max_prompt_tokens);
     int32_t n_prompt = llama_tokenize(vocab, input.c_str(), (int32_t) input.size(),
-                                       prompt_tokens.data(), (int32_t) prompt_tokens.size(), is_first, false);
+                                       prompt_tokens_buf.data(), (int32_t) prompt_tokens_buf.size(), is_first, false);
     if (n_prompt <= 0) return env->NewStringUTF("Tokenization failed.");
+
+    std::vector<llama_token> prompt_tokens(prompt_tokens_buf.begin(), prompt_tokens_buf.begin() + n_prompt);
 
     llama_pos base_pos = is_first ? 0 : mem_pos_max + 1;
 
-    // Evaluate prompt
-    struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
-    if (!batch.token) return env->NewStringUTF("Batch init failed.");
-    for (int i = 0; i < n_prompt; ++i) {
-        batch.token[i]  = prompt_tokens[i];
-        batch.logits[i] = (i == n_prompt - 1) ? 1 : 0;
+    // Only decode the delta tokens compared to the last cached prompt to reduce
+    // time-to-first-token when prompts share prefixes or repeat.
+    int start_index = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        if (g_cached_session_id == g_session_id.load() && !g_last_prompt_tokens.empty()) {
+            int common = common_prefix_tokens(prompt_tokens, g_last_prompt_tokens);
+            int tokens_in_ctx = (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1);
+            if (g_last_prompt_token_count <= (size_t)tokens_in_ctx) {
+                start_index = std::min(common, tokens_in_ctx);
+            } else {
+                // cache invalid for current context
+                g_last_prompt_tokens.clear();
+                g_last_prompt_token_count = 0;
+                g_cached_session_id = g_session_id.load();
+            }
+        }
     }
-    batch.n_tokens = n_prompt;
-    if (batch.pos)      for (int i = 0; i < n_prompt; ++i) batch.pos[i] = base_pos + i;
-    if (batch.n_seq_id) for (int i = 0; i < n_prompt; ++i) batch.n_seq_id[i] = 1;
-    if (batch.seq_id)   for (int i = 0; i < n_prompt; ++i) { if (batch.seq_id[i]) batch.seq_id[i][0] = 0; }
 
-    if (g_stop_requested.load()) { llama_batch_free(batch); return env->NewStringUTF("[Cancelled]"); }
-
-    LOGI("[llama_jni] Decoding prompt (%d tokens)... this may take a while", n_prompt);
     int64_t t_start = llama_time_us();
-    int32_t res = llama_decode(g_ctx, batch);
-    int64_t t_prompt_done = llama_time_us();
-    llama_batch_free(batch);
-    LOGI("[llama_jni] Prompt decoded in %.1f sec (result=%d)",
-         (double)(t_prompt_done - t_start) / 1000000.0, (int)res);
+    int32_t res = 0;
+    int64_t t_prompt_done = t_start;
+
+    if (start_index < n_prompt) {
+        int delta = n_prompt - start_index;
+        struct llama_batch batch = llama_batch_init(delta, 0, 1);
+        if (!batch.token) return env->NewStringUTF("Batch init failed.");
+        for (int i = start_index; i < n_prompt; ++i) {
+            batch.token[i - start_index] = prompt_tokens[i];
+            batch.logits[i - start_index] = (i == n_prompt - 1) ? 1 : 0;
+        }
+        batch.n_tokens = delta;
+        if (batch.pos)      for (int i = 0; i < delta; ++i) batch.pos[i] = base_pos + start_index + i;
+        if (batch.n_seq_id) for (int i = 0; i < delta; ++i) batch.n_seq_id[i] = 1;
+        if (batch.seq_id)   for (int i = 0; i < delta; ++i) { if (batch.seq_id[i]) batch.seq_id[i][0] = 0; }
+
+        if (g_stop_requested.load()) { llama_batch_free(batch); return env->NewStringUTF("[Cancelled]"); }
+
+        LOGI("[llama_jni] Decoding prompt delta (%d tokens)...", delta);
+        res = llama_decode(g_ctx, batch);
+        t_prompt_done = llama_time_us();
+        llama_batch_free(batch);
+        LOGI("[llama_jni] Prompt delta decoded in %.1f sec (result=%d)",
+             (double)(t_prompt_done - t_start) / 1000000.0, (int)res);
+    } else {
+        t_prompt_done = llama_time_us();
+        LOGI("[llama_jni] prompt tokens already present in context - skipping decode");
+    }
 
     if (res != 0) return env->NewStringUTF("Evaluation failed.");
+
+    // Update cached tokenization
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        g_last_prompt_tokens = prompt_tokens;
+        if (g_last_prompt_tokens.size() > G_PROMPT_TOKEN_CACHE_LIMIT) g_last_prompt_tokens.resize(G_PROMPT_TOKEN_CACHE_LIMIT);
+        g_last_prompt_token_count = g_last_prompt_tokens.size();
+        g_cached_session_id = g_session_id.load();
+    }
 
     LOGI("[llama_jni] Starting token-by-token streaming...");
 
@@ -784,14 +1442,43 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
                     "[llama_jni] token[%d]: \"%s\" (id=%d)", t, piece_buf, (int)id);
             }
 
-            // Stream token to Java callback
+            // Stream token to Java callback with batching to reduce JNI overhead
             if (onTokenMethod) {
-                jstring jtoken = env->NewStringUTF(piece_buf);
-                jboolean cont = env->CallBooleanMethod(callback, onTokenMethod, jtoken);
-                env->DeleteLocalRef(jtoken);
-                if (!cont) {
-                    LOGI("[llama_jni] callback returned false at token %d — stopping", t);
-                    break; // callback returned false → stop
+                static const int STREAM_FLUSH_TOKENS = 4;
+                static const int STREAM_FLUSH_BYTES = 128;
+                static const std::string punctuation = ".!?\n";
+                // accumulate tokens into a small buffer and flush under conditions
+                static thread_local std::string stream_buffer;
+                static thread_local int stream_token_count = 0;
+                bool flush_now = false;
+
+                stream_buffer.append(piece_buf, piece_len);
+                if (stream_token_count == 0) {
+                    // first token: flush immediately for responsiveness
+                    flush_now = true;
+                } else {
+                    stream_token_count++;
+                    // flush on token count, buffer size, or punctuation/newline
+                    if (stream_token_count >= STREAM_FLUSH_TOKENS) flush_now = true;
+                    if ((int)stream_buffer.size() >= STREAM_FLUSH_BYTES) flush_now = true;
+                    char lastc = piece_buf[piece_len - 1];
+                    if (punctuation.find(lastc) != std::string::npos) flush_now = true;
+                }
+
+                if (flush_now) {
+                    jstring jtoken = env->NewStringUTF(stream_buffer.c_str());
+                    jboolean cont = env->CallBooleanMethod(callback, onTokenMethod, jtoken);
+                    env->DeleteLocalRef(jtoken);
+                    stream_buffer.clear();
+                    stream_token_count = 0;
+                    if (!cont) {
+                        LOGI("[llama_jni] callback returned false at token %d — stopping", t);
+                        break; // callback returned false → stop
+                    }
+                }
+                else {
+                    // ensure we increment token counter for first append
+                    if (stream_token_count == 0) stream_token_count = 1;
                 }
             }
         }
@@ -840,6 +1527,14 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_releaseModel(
         llama_model_free(g_model);
         g_model = nullptr;
         LOGI("[llama_jni] model released (llama_model_free)");
+    }
+    // bump session id and clear token cache
+    g_session_id.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
+        g_last_prompt_tokens.clear();
+        g_last_prompt_token_count = 0;
+        g_cached_session_id = g_session_id.load();
     }
 }
 
@@ -913,6 +1608,65 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
         jobject /* callback */) {
     // Placeholder: just delegate to generate
     return Java_com_droidrocks_ondeviceai_LlamaBridge_generate(env, nullptr, prompt, 0, 0.0f, 0.0f);
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_appendPromptTokens(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jstring /* prompt */) {
+    LOGI("[llama_jni placeholder] appendPromptTokens called but llama.cpp is not integrated");
+    return JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_pretokenizePrompt(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jstring /* prompt */) {
+    LOGI("[llama_jni placeholder] pretokenizePrompt called but llama.cpp is not integrated");
+    return nullptr;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_resetSession(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    LOGI("[llama_jni placeholder] resetSession called but llama.cpp is not integrated");
+    return JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_isGpuEnabled(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    return 0; // DISABLED
+}
+
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_getOptimalBatchSettings(
+        JNIEnv *env,
+        jobject /* thiz */) {
+    jintArray out = env->NewIntArray(2);
+    if (!out) return nullptr;
+    jint tmp[2] = {64, 64};
+    env->SetIntArrayRegion(out, 0, 2, tmp);
+    return out;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_droidrocks_ondeviceai_LlamaBridge_trimContextTo(
+        JNIEnv *env,
+        jobject /* thiz */,
+        jint /* keepTokens */) {
+    LOGI("[llama_jni placeholder] trimContextTo called but llama.cpp is not integrated");
+    return JNI_FALSE;
 }
 
 extern "C"

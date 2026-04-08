@@ -19,6 +19,13 @@ android {
         multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // Limit ABIs during development to speed up builds and avoid
+        // assembly/toolchain issues on non-ARM targets. Change or remove
+        // this for production multi-ABI builds.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
         // Room schema export
         javaCompileOptions {
             annotationProcessorOptions {

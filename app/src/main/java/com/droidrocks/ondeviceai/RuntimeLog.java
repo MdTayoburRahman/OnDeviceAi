@@ -75,7 +75,7 @@ public class RuntimeLog {
 
         // Extract message after [llama_jni]
         int tagIndex = line.indexOf(LLAMA_JNI_TAG);
-        String message = "";
+        String message;
         if (tagIndex >= 0) {
             message = line.substring(tagIndex + LLAMA_JNI_TAG.length()).trim();
         } else {

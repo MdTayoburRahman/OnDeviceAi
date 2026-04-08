@@ -25,6 +25,7 @@ import com.droidrocks.ondeviceai.adapter.ChatAdapter;
 import com.droidrocks.ondeviceai.data.ChatMessage;
 import com.droidrocks.ondeviceai.data.ChatRepository;
 import android.widget.ScrollView;
+import android.widget.ProgressBar;
 
 import java.io.File;
 import java.util.UUID;
@@ -47,6 +48,8 @@ public class MainActivity extends BaseActivity {
     private Button btnModels;
     private Button btnClearChat;
     private Button btnHistory;
+    private Button btnNewChat; // dynamically-created or from layout: starts a fresh chat and resets native session
+    private ProgressBar progressResetSession;
     private TextView tvGenTimer;
     private TextView tvSysUsage;
 
@@ -142,6 +145,29 @@ public class MainActivity extends BaseActivity {
         btnClearChat = findViewById(R.id.btnClearChat);
         btnHistory = findViewById(R.id.btnHistory);
 
+        // New Chat button: try to find one in the layout, otherwise create it next to the models button
+        btnNewChat = findViewById(getResources().getIdentifier("btnNewChat", "id", getPackageName()));
+        // progress indicator (may be null if layout doesn't include it)
+        progressResetSession = findViewById(getResources().getIdentifier("progressResetSession", "id", getPackageName()));
+        if (btnNewChat == null) {
+            try {
+                android.view.View parent = (android.view.View) btnModels.getParent();
+                if (parent instanceof android.view.ViewGroup) {
+                    android.widget.Button b = new android.widget.Button(this);
+                    b.setText("New Chat");
+                    b.setId(android.view.View.generateViewId());
+                    btnNewChat = b;
+                    android.view.ViewGroup vg = (android.view.ViewGroup) parent;
+                    // insert the new button near the models button if possible
+                    int idx = vg.indexOfChild(btnModels);
+                    if (idx >= 0 && idx < vg.getChildCount()) vg.addView(btnNewChat, idx + 1);
+                    else vg.addView(btnNewChat);
+                }
+            } catch (Throwable ignored) {
+                btnNewChat = null;
+            }
+        }
+
         // RAM chips
         tvAppRam = findViewById(R.id.tvAppRam);
         tvDeviceRam = findViewById(R.id.tvDeviceRam);
@@ -230,6 +256,60 @@ public class MainActivity extends BaseActivity {
         // Chat history button
         if (btnHistory != null) {
             btnHistory.setOnClickListener(v -> openChatHistory());
+        }
+
+        // Wire the New Chat button to start a fresh conversation and reset native session state.
+        if (btnNewChat != null) {
+            btnNewChat.setOnClickListener(v -> {
+                // Start UI-side new chat immediately
+                startNewChat();
+                toast(getString(R.string.btn_new_chat));
+
+                // Show progress indicator and disable the button while native reset runs
+                mainHandler.post(() -> {
+                    try {
+                        if (progressResetSession != null) progressResetSession.setVisibility(View.VISIBLE);
+                        btnNewChat.setEnabled(false);
+                    } catch (Throwable ignored) {}
+                });
+
+                // Reset native session in background so UI remains responsive
+                executor.execute(() -> {
+                    boolean ok = false;
+                    try {
+                        RuntimeLog.append("llama_jni: [llama_jni] resetSession: starting");
+                        if (LlamaBridge.isNativeLoaded()) {
+                            if (llamaBridge == null) llamaBridge = new LlamaBridge();
+                            try {
+                                ok = llamaBridge.resetSession();
+                                Log.i(TAG, "resetSession returned " + ok);
+                                RuntimeLog.append("llama_jni: [llama_jni] resetSession returned " + ok);
+                            } catch (Throwable t) {
+                                Log.w(TAG, "resetSession failed", t);
+                                RuntimeLog.append("llama_jni: [llama_jni] resetSession failed: " + t.getMessage());
+                                ok = false;
+                            }
+                        } else {
+                            RuntimeLog.append("llama_jni: [llama_jni] resetSession skipped: native not loaded");
+                        }
+                    } catch (Throwable ignored) {
+                        ok = false;
+                    }
+
+                    final boolean success = ok;
+                    mainHandler.post(() -> {
+                        try {
+                            if (progressResetSession != null) progressResetSession.setVisibility(View.GONE);
+                            btnNewChat.setEnabled(true);
+                            if (success) {
+                                toast(getString(R.string.reset_success));
+                            } else {
+                                toast(getString(R.string.reset_failed));
+                            }
+                        } catch (Throwable ignored) {}
+                    });
+                });
+            });
         }
 
         // If a model was found earlier, attempt to load it; otherwise redirect to download

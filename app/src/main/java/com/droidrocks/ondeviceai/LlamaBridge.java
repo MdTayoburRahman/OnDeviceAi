@@ -23,6 +23,32 @@ public class LlamaBridge {
 
     public native String generate(String prompt, int maxTokens, float temperature, float topP);
 
+    // GPU status enum values returned by isGpuEnabled()
+    public static final int GPU_STATUS_DISABLED = 0;
+    public static final int GPU_STATUS_AVAILABLE = 1;
+    public static final int GPU_STATUS_ENABLED = 2;
+
+    /** Callback interface for enableGpuBackendAsync progress/completion */
+    public interface GpuEnableCallback {
+        /** Progress update in percent 0..100 (may be called from native thread) */
+        void onProgress(int percent);
+        /** Called when enableGpuBackendAsync completes; success=true on success */
+        void onComplete(boolean success);
+    }
+
+    /** Asynchronously attempt to enable a GPU backend. freeBytes is a hint of free Java heap/native memory in bytes.
+     *  The callback (may be null) will receive progress and completion notifications. */
+    public native boolean enableGpuBackendAsync(long freeBytes, GpuEnableCallback callback);
+
+    /** Returns one of GPU_STATUS_* constants describing GPU availability/enabled state. */
+    public native int isGpuEnabled();
+
+    /** Returns an int[2] with {n_batch, n_ubatch} optimal settings discovered at load time. */
+    public native int[] getOptimalBatchSettings();
+
+    /** Trim internal native context to keep only last keepTokens tokens (rebuilds context). */
+    public native boolean trimContextTo(int keepTokens);
+
     /** Callback interface for streaming token-by-token output */
     public interface TokenCallback {
         /** Called from native for each generated token. Return false to stop generation. */
@@ -40,6 +66,9 @@ public class LlamaBridge {
     public native void interruptGeneration();
 
     public native void releaseModel();
+
+    /** Reset the native session/context and clear cached prompt tokens. Safe to call from background thread. */
+    public native boolean resetSession();
 
     // Vulkan probe getters (implemented in native code). May return empty/0 when Vulkan isn't available.
     public native boolean isVulkanAvailable();
