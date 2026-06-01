@@ -1341,6 +1341,15 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
 
     llama_pos base_pos = is_first ? 0 : mem_pos_max + 1;
 
+    // Check available context slots to prevent overflow crash
+    int used_slots = (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1);
+    int free_slots = g_context_n_ctx - used_slots;
+    if (n_prompt > free_slots) {
+        LOGI("[llama_jni] Context full: need %d tokens, have %d free (%d used of %d total)",
+             n_prompt, free_slots, used_slots, g_context_n_ctx);
+        return env->NewStringUTF("Context is full. Please start a new chat to continue.");
+    }
+
     // Only decode the delta tokens compared to the last cached prompt to reduce
     // time-to-first-token when prompts share prefixes or repeat.
     int start_index = 0;
@@ -1366,25 +1375,47 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
 
     if (start_index < n_prompt) {
         int delta = n_prompt - start_index;
-        struct llama_batch batch = llama_batch_init(delta, 0, 1);
-        if (!batch.token) return env->NewStringUTF("Batch init failed.");
-        for (int i = start_index; i < n_prompt; ++i) {
-            batch.token[i - start_index] = prompt_tokens[i];
-            batch.logits[i - start_index] = (i == n_prompt - 1) ? 1 : 0;
+        // Chunk the prompt into batches that respect n_batch to avoid
+        // GGML_ASSERT(n_tokens_all <= n_batch) firing inside llama_decode
+        const int MAX_CHUNK = g_opt_n_batch > 0 ? g_opt_n_batch : 128;
+        int processed = 0;
+
+        LOGI("[llama_jni] Decoding prompt delta (%d tokens) in chunks of %d...", delta, MAX_CHUNK);
+
+        while (processed < delta) {
+            int chunk = std::min(MAX_CHUNK, delta - processed);
+            struct llama_batch batch = llama_batch_init(chunk, 0, 1);
+            if (!batch.token) return env->NewStringUTF("Batch init failed.");
+
+            for (int i = 0; i < chunk; ++i) {
+                int src_idx = start_index + processed + i;
+                batch.token[i] = prompt_tokens[src_idx];
+                batch.logits[i] = (src_idx == n_prompt - 1) ? 1 : 0;
+            }
+            batch.n_tokens = chunk;
+            if (batch.pos)      for (int i = 0; i < chunk; ++i) batch.pos[i] = base_pos + start_index + processed + i;
+            if (batch.n_seq_id) for (int i = 0; i < chunk; ++i) batch.n_seq_id[i] = 1;
+            if (batch.seq_id)   for (int i = 0; i < chunk; ++i) { if (batch.seq_id[i]) batch.seq_id[i][0] = 0; }
+
+            if (g_stop_requested.load()) { llama_batch_free(batch); return env->NewStringUTF("[Cancelled]"); }
+
+            res = llama_decode(g_ctx, batch);
+            llama_batch_free(batch);
+            if (res != 0) {
+                LOGI("[llama_jni] Prompt chunk at offset %d failed (res=%d)", processed, (int)res);
+                if (res == 1) {
+                    return env->NewStringUTF("Context memory full. Tap \"New Chat\" to reset and try again.");
+                }
+                if (res == -1) {
+                    return env->NewStringUTF("Context corrupted (may happen after stop). Tap \"New Chat\" to reset.");
+                }
+                return env->NewStringUTF("Evaluation failed.");
+            }
+            processed += chunk;
         }
-        batch.n_tokens = delta;
-        if (batch.pos)      for (int i = 0; i < delta; ++i) batch.pos[i] = base_pos + start_index + i;
-        if (batch.n_seq_id) for (int i = 0; i < delta; ++i) batch.n_seq_id[i] = 1;
-        if (batch.seq_id)   for (int i = 0; i < delta; ++i) { if (batch.seq_id[i]) batch.seq_id[i][0] = 0; }
-
-        if (g_stop_requested.load()) { llama_batch_free(batch); return env->NewStringUTF("[Cancelled]"); }
-
-        LOGI("[llama_jni] Decoding prompt delta (%d tokens)...", delta);
-        res = llama_decode(g_ctx, batch);
         t_prompt_done = llama_time_us();
-        llama_batch_free(batch);
-        LOGI("[llama_jni] Prompt delta decoded in %.1f sec (result=%d)",
-             (double)(t_prompt_done - t_start) / 1000000.0, (int)res);
+        LOGI("[llama_jni] Prompt delta decoded in %.1f sec",
+             (double)(t_prompt_done - t_start) / 1000000.0);
     } else {
         t_prompt_done = llama_time_us();
         LOGI("[llama_jni] prompt tokens already present in context - skipping decode");
@@ -1492,6 +1523,13 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
         if (one.pos) one.pos[0] = base_pos + n_prompt + t;
         if (one.n_seq_id) one.n_seq_id[0] = 1;
         if (one.seq_id && one.seq_id[0]) one.seq_id[0][0] = 0;
+
+        // Safety: stop before overflowing the context
+        if (base_pos + n_prompt + t >= (llama_pos)g_context_n_ctx) {
+            LOGI("[llama_jni] Token loop hit context limit at pos %d (max %d)",
+                 (int)(base_pos + n_prompt + t), g_context_n_ctx);
+            break;
+        }
 
         if (llama_decode(g_ctx, one) != 0) break;
     }

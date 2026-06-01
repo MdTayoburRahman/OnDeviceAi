@@ -1,6 +1,9 @@
 package com.droidrocks.ondeviceai;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.view.inputmethod.InputMethodManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -99,7 +102,7 @@ public class MainActivity extends BaseActivity {
     private static final int MAX_PROMPT_CHARS = 1024; // truncate combined prompt to this many chars (from the end)
     private volatile boolean isModelLoaded = false;
     private File modelFile;
-    private boolean fastMode = false; // when true use greedy sampling for lower latency
+    private SharedPreferences prefs;
     // whether we've already sent the initial system prompt and earlier conversation to the native context
     private boolean contextPrimed = false;
     // one-time system prompt to prime the model/context when first sending text
@@ -269,6 +272,14 @@ public class MainActivity extends BaseActivity {
         if (btnHistory != null) {
             btnHistory.setOnClickListener(v -> openChatHistory());
         }
+
+        // Settings button
+        Button btnSettings = findViewById(R.id.btnSettings);
+        if (btnSettings != null) {
+            btnSettings.setOnClickListener(v -> startActivity(new Intent(MainActivity.this, SettingsActivity.class)));
+        }
+
+        prefs = App.getPrefs(this);
 
         // Wire the New Chat button to start a fresh conversation and reset native session state.
         if (btnNewChat != null) {
@@ -652,7 +663,7 @@ private void setupChatRecyclerView() {
                             }
 
                             int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
-                            loaded = llamaBridge.loadModel(modelFile.getAbsolutePath(), 1024, threads);
+                            loaded = llamaBridge.loadModel(modelFile.getAbsolutePath(), 2048, threads);
                             Log.i(TAG, "Native loadModel returned " + loaded);
                             RuntimeLog.append("Native loadModel returned " + loaded);
                         } catch (Throwable t) {
@@ -705,6 +716,10 @@ private void setupChatRecyclerView() {
 
     private void generateText() {
         String input = etPrompt.getText().toString().trim();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(etPrompt.getWindowToken(), 0);
+        }
         etPrompt.setText("");
         Log.i(TAG, "generateText: prompt length=" + input.length());
 
@@ -782,9 +797,13 @@ private void setupChatRecyclerView() {
                 final StringBuilder streamed = new StringBuilder();
                 final int[] tokenCount = {0};
 
+                // Read sampling params from preferences
+                float temperature = prefs.getFloat(App.KEY_TEMPERATURE, 0.4f);
+                float topP = prefs.getFloat(App.KEY_TOP_P, 0.95f);
+                int maxTokens = prefs.getInt(App.KEY_MAX_TOKENS, 150);
+
                 // Use streaming generation — callback fires per token on this background thread
-                result = llamaBridge.generateStreaming(toSend, 150,
-                        fastMode ? 0.0f : 0.4f, fastMode ? 1.0f : 0.95f,
+                result = llamaBridge.generateStreaming(toSend, maxTokens, temperature, topP,
                         token -> {
                             streamed.append(token);
                             tokenCount[0]++;
@@ -824,6 +843,17 @@ private void setupChatRecyclerView() {
                 // Only clear stopRequested if this is still the current generation
                 if (thisGenId == generationId) {
                     stopRequested = false;
+                } else {
+                    // Generation was stopped — native context may be corrupted.
+                    // Auto-reset the session so the next turn starts clean.
+                    try {
+                        if (llamaBridge != null && LlamaBridge.isNativeLoaded()) {
+                            llamaBridge.resetSession();
+                            contextPrimed = false;
+                            Log.i(TAG, "Auto-reset session after stopped generation");
+                            RuntimeLog.append("Session reset after stop");
+                        }
+                    } catch (Throwable ignored) {}
                 }
             }
 
