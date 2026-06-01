@@ -26,6 +26,7 @@
     <string name="content_desc_log">Log Terminal</string>
     <string name="content_desc_chat">Chat</string>
     <string name="content_desc_model">Model</string>
+    <string name="content_desc_copy">Copy to clipboard</string>
     <string name="chat_cleared">Chat history cleared</string>
     <string name="confirm_clear_chat">Clear all chat history?</string>
     <string name="yes">Yes</string>

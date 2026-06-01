@@ -1,9 +1,14 @@
 package com.droidrocks.ondeviceai.adapter;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
@@ -49,8 +54,10 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position, @NonNull List<Object> payloads) {
         if (!payloads.isEmpty() && holder instanceof AiMessageViewHolder) {
-            // Partial bind for streaming updates — just set the text, skip full rebind
-            ((AiMessageViewHolder) holder).tvMessage.setText(messages.get(position).getContent());
+            AiMessageViewHolder aiHolder = (AiMessageViewHolder) holder;
+            String content = messages.get(position).getContent();
+            aiHolder.tvMessage.setText(content);
+            aiHolder.btnCopy.setVisibility(content.endsWith("▍") ? View.GONE : View.VISIBLE);
             return;
         }
         onBindViewHolder(holder, position);
@@ -69,6 +76,8 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             AiMessageViewHolder aiHolder = (AiMessageViewHolder) holder;
             aiHolder.tvMessage.setText(message.getContent());
             aiHolder.tvTime.setText(time);
+            boolean streaming = message.getContent().endsWith("▍");
+            aiHolder.btnCopy.setVisibility(streaming ? View.GONE : View.VISIBLE);
         }
     }
 
@@ -133,11 +142,22 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     static class AiMessageViewHolder extends RecyclerView.ViewHolder {
         TextView tvMessage;
         TextView tvTime;
+        ImageView btnCopy;
 
         AiMessageViewHolder(@NonNull View itemView) {
             super(itemView);
             tvMessage = itemView.findViewById(R.id.tvAiMessage);
             tvTime = itemView.findViewById(R.id.tvAiTime);
+            btnCopy = itemView.findViewById(R.id.btnCopyAi);
+            btnCopy.setOnClickListener(v -> {
+                String text = tvMessage.getText().toString();
+                if (!text.isEmpty()) {
+                    ClipboardManager cm = (ClipboardManager) itemView.getContext()
+                            .getSystemService(Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(ClipData.newPlainText("AI response", text));
+                    Toast.makeText(itemView.getContext(), "Copied", Toast.LENGTH_SHORT).show();
+                }
+            });
         }
     }
 }

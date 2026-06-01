@@ -57,11 +57,26 @@
         android:layout_height="0dp"
         android:clipToPadding="false"
         android:paddingVertical="8dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/tvRamInfo"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/downloadProgress"
         tools:listitem="@layout/item_available_model" />
+
+    <TextView
+        android:id="@+id/tvRamInfo"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:gravity="center"
+        android:textColor="@color/on_surface_variant"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        tools:text="Showing 6 of 14 models (1.2 GB free)" />
+
 
 </androidx.constraintlayout.widget.ConstraintLayout>
 
