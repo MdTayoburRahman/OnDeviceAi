@@ -23,6 +23,7 @@ android {
         // assembly/toolchain issues on non-ARM targets. Change or remove
         // this for production multi-ABI builds.
         ndk {
+            //noinspection ChromeOsAbiSupport
             abiFilters += listOf("arm64-v8a")
         }
 
@@ -42,6 +43,9 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+    buildFeatures {
+        viewBinding = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

@@ -3,12 +3,12 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- Primary Colors - Modern Blue/Purple AI Theme -->
-    <color name="primary">#6750A4</color>
-    <color name="primary_variant">#7F67BE</color>
+    <!-- Primary Colors - Modern Blue AI Theme -->
+    <color name="primary">#1B6EF3</color>
+    <color name="primary_variant">#1565D0</color>
     <color name="on_primary">#FFFFFF</color>
-    <color name="primary_container">#EADDFF</color>
-    <color name="on_primary_container">#21005D</color>
+    <color name="primary_container">#D6E4FF</color>
+    <color name="on_primary_container">#001B3D</color>
 
     <!-- Secondary Colors -->
     <color name="secondary">#625B71</color>

@@ -27,10 +27,12 @@
         <activity
             android:name=".ModelListActivity"
             android:exported="false" />
+
         <activity
             android:name=".ChatHistoryActivity"
             android:exported="false"
             android:label="@string/chat_history_title" />
+
     </application>
 
 </manifest>

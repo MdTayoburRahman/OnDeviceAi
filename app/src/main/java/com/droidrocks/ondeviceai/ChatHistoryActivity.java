@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.droidrocks.ondeviceai.adapter.ChatHistoryAdapter;
 import com.droidrocks.ondeviceai.data.ChatRepository;
 import com.droidrocks.ondeviceai.data.ChatSession;
+import com.droidrocks.ondeviceai.databinding.ActivityChatHistoryBinding;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
 
@@ -24,6 +25,7 @@ import java.util.List;
 
 public class ChatHistoryActivity extends BaseActivity {
 
+    private ActivityChatHistoryBinding binding;
     public static final String EXTRA_SESSION_ID = "session_id";
     public static final String EXTRA_NEW_CHAT = "new_chat";
     public static final int RESULT_LOAD_SESSION = 100;
@@ -37,13 +39,9 @@ public class ChatHistoryActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_chat_history);
-
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.headerSection).getRootView(), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+       binding = ActivityChatHistoryBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+        applyEdgeToEdgeInsets(binding.getRoot());
 
         chatRepository = new ChatRepository(this);
 

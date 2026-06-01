@@ -9,12 +9,14 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.droidrocks.ondeviceai.adapter.ModelsPagerAdapter;
+import com.droidrocks.ondeviceai.databinding.ActivityModelListBinding;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 
 public class ModelListActivity extends BaseActivity {
 
     private static final String TAG = "ModelListActivity";
+    private ActivityModelListBinding binding;
     
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
@@ -25,13 +27,12 @@ public class ModelListActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_model_list);
+        binding = ActivityModelListBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+        applyEdgeToEdgeInsets(binding.getRoot());
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.headerSection).getRootView(), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+
+
 
         // Initialize tab titles
         tabTitles[0] = getString(R.string.tab_downloaded);

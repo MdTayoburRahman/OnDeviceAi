@@ -26,6 +26,8 @@ import com.droidrocks.ondeviceai.data.ChatMessage;
 import com.droidrocks.ondeviceai.data.ChatRepository;
 import android.widget.ScrollView;
 import android.widget.ProgressBar;
+
+import com.droidrocks.ondeviceai.databinding.ActivityMainBinding;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.io.File;
@@ -104,10 +106,14 @@ public class MainActivity extends BaseActivity {
     private static final String SYSTEM_PROMPT = "<|system|>\nYou are a helpful assistant. Answer concisely.\n<|end|>\n";
     private GpuInfo gpuInfo;
 
+    private ActivityMainBinding binding;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+        binding = ActivityMainBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+        applyEdgeToEdgeInsets(binding.getRoot());
 
 
         // Handle window insets for both system bars and IME (keyboard)
