@@ -1067,6 +1067,14 @@ private void setupChatRecyclerView() {
 
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        if (generating || currentGenFuture != null) {
+            stopGeneration();
+        }
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         cpuMonitor.stop();
