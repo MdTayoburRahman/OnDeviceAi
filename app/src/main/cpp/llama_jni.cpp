@@ -1350,24 +1350,17 @@ Java_com_droidrocks_ondeviceai_LlamaBridge_generateStreaming(
         return env->NewStringUTF("Context is full. Please start a new chat to continue.");
     }
 
-    // Only decode the delta tokens compared to the last cached prompt to reduce
-    // time-to-first-token when prompts share prefixes or repeat.
+    // The streaming function always decodes the full prompt.
+    // The prompt token cache (common_prefix_tokens) is not used here because
+    // the prompt format changes between calls: the first call sends system+user,
+    // subsequent calls send only the user turn. The cache was designed for the
+    // non-streaming generate() which always sends the same full prompt.
     int start_index = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_last_prompt_mutex);
-        if (g_cached_session_id == g_session_id.load() && !g_last_prompt_tokens.empty()) {
-            int common = common_prefix_tokens(prompt_tokens, g_last_prompt_tokens);
-            int tokens_in_ctx = (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1);
-            if (g_last_prompt_token_count <= (size_t)tokens_in_ctx) {
-                start_index = std::min(common, tokens_in_ctx);
-            } else {
-                // cache invalid for current context
-                g_last_prompt_tokens.clear();
-                g_last_prompt_token_count = 0;
-                g_cached_session_id = g_session_id.load();
-            }
-        }
-    }
+
+    // Log context state for diagnostics
+    LOGI("[llama_jni] Context state: mem_pos_max=%d, base_pos=%d, n_prompt=%d, used=%d/%d slots",
+         (int)mem_pos_max, (int)base_pos, n_prompt,
+         (mem_pos_max == -1) ? 0 : (int)(mem_pos_max + 1), g_context_n_ctx);
 
     int64_t t_start = llama_time_us();
     int32_t res = 0;
