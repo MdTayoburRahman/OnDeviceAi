@@ -80,8 +80,19 @@
             android:contentDescription="@string/btn_delete_session"
             app:tint="@color/error"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Rename button -->
+        <ImageButton
+            android:id="@+id/btnRenameSession"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_rename"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/btn_rename_session"
+            app:tint="@color/on_surface_variant"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/btnDeleteSession" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

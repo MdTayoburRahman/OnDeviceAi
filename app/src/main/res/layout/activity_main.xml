@@ -116,6 +116,17 @@
                 app:icon="@drawable/automation_24dp"
                 app:iconSize="18dp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSettings"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:contentDescription="@string/btn_settings"
+                app:icon="@drawable/ic_settings"
+                app:iconSize="20dp"
+                app:iconTint="@color/on_primary_container" />
+
 
             <!-- Small progress indicator shown while native resetSession() runs -->
             <ProgressBar

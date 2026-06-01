@@ -30,6 +30,7 @@ public class ChatHistoryAdapter extends RecyclerView.Adapter<ChatHistoryAdapter.
     public interface OnSessionClickListener {
         void onSessionClick(ChatSession session);
         void onDeleteClick(ChatSession session);
+        void onRenameClick(ChatSession session);
     }
 
     public void setOnSessionClickListener(OnSessionClickListener listener) {
@@ -63,6 +64,14 @@ public class ChatHistoryAdapter extends RecyclerView.Adapter<ChatHistoryAdapter.
                 listener.onDeleteClick(session);
             }
         });
+
+        if (holder.btnRename != null) {
+            holder.btnRename.setOnClickListener(v -> {
+                if (listener != null) {
+                    listener.onRenameClick(session);
+                }
+            });
+        }
     }
 
     @Override
@@ -96,6 +105,7 @@ public class ChatHistoryAdapter extends RecyclerView.Adapter<ChatHistoryAdapter.
         TextView tvDate;
         TextView tvMessageCount;
         ImageButton btnDelete;
+        ImageButton btnRename;
 
         ViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -103,6 +113,7 @@ public class ChatHistoryAdapter extends RecyclerView.Adapter<ChatHistoryAdapter.
             tvDate = itemView.findViewById(R.id.tvSessionDate);
             tvMessageCount = itemView.findViewById(R.id.tvMessageCount);
             btnDelete = itemView.findViewById(R.id.btnDeleteSession);
+            btnRename = itemView.findViewById(R.id.btnRenameSession);
         }
     }
 }

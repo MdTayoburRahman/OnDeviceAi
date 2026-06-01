@@ -1,8 +1,10 @@
 package com.droidrocks.ondeviceai;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -35,6 +37,7 @@ public class ChatHistoryActivity extends BaseActivity {
     private LinearLayout emptyState;
     private ChatHistoryAdapter adapter;
     private ChatRepository chatRepository;
+    private List<ChatSession> currentSessions;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +75,11 @@ public class ChatHistoryActivity extends BaseActivity {
             public void onDeleteClick(ChatSession session) {
                 confirmDeleteSession(session);
             }
+
+            @Override
+            public void onRenameClick(ChatSession session) {
+                showRenameDialog(session);
+            }
         });
 
         btnBack.setOnClickListener(v -> finish());
@@ -83,6 +91,14 @@ public class ChatHistoryActivity extends BaseActivity {
 
     private void loadChatHistory() {
         chatRepository.getAllChatSessions(sessions -> {
+            if (sessions != null) {
+                SharedPreferences prefs = App.getPrefs(ChatHistoryActivity.this);
+                for (ChatSession s : sessions) {
+                    String alias = prefs.getString(App.KEY_SESSION_TITLE_PREFIX + s.getSessionId(), null);
+                    s.setAlias(alias);
+                }
+            }
+            currentSessions = sessions;
             updateUI(sessions);
         });
     }
@@ -117,6 +133,31 @@ public class ChatHistoryActivity extends BaseActivity {
             .setTitle(R.string.btn_delete_session)
             .setMessage(R.string.confirm_delete_session)
             .setPositiveButton(R.string.yes, (dialog, which) -> deleteSession(session))
+            .setNegativeButton(R.string.no, null)
+            .show();
+    }
+
+    private void showRenameDialog(ChatSession session) {
+        EditText input = new EditText(this);
+        input.setHint(R.string.rename_session_hint);
+        String currentTitle = session.getAlias() != null ? session.getAlias() : session.getPreview();
+        input.setText(currentTitle);
+        input.setSelectAllOnFocus(true);
+
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.rename_session_dialog_title)
+            .setView(input)
+            .setPositiveButton(R.string.yes, (dialog, which) -> {
+                String newTitle = input.getText().toString().trim();
+                if (!newTitle.isEmpty()) {
+                    App.getPrefs(this).edit()
+                        .putString(App.KEY_SESSION_TITLE_PREFIX + session.getSessionId(), newTitle)
+                        .apply();
+                    session.setAlias(newTitle);
+                    adapter.notifyDataSetChanged();
+                    Toast.makeText(this, R.string.session_renamed, Toast.LENGTH_SHORT).show();
+                }
+            })
             .setNegativeButton(R.string.no, null)
             .show();
     }

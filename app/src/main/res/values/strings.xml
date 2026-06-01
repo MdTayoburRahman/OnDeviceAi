@@ -68,4 +68,34 @@
     <string name="confirm_delete_model">Delete this model?</string>
     <string name="confirm_delete_model_desc">This will permanently delete the model file from your device.</string>
     <string name="model_deleted">Model deleted</string>
+
+    <!-- Sampling Controls -->
+    <string name="temperature_label">Temperature</string>
+    <string name="top_p_label">Top-P</string>
+    <string name="max_tokens_label">Max tokens</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="btn_settings">Settings</string>
+    <string name="theme_header">Appearance</string>
+    <string name="theme_label">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="sampling_header">Generation Defaults</string>
+    <string name="default_temp_label">Temperature</string>
+    <string name="default_temp_desc">Controls randomness. Lower = precise &amp; factual. Higher = creative &amp; varied.</string>
+    <string name="default_top_p_label">Top-P</string>
+    <string name="default_top_p_desc">Limits choices to top probable tokens. Lower = focused. Higher = diverse.</string>
+    <string name="default_max_tokens_label">Max tokens</string>
+    <string name="default_max_tokens_desc">Maximum length of the generated response (in tokens).</string>
+    <string name="about_header">About</string>
+    <string name="about_app_name">OnDevice AI</string>
+    <string name="theme_restart_msg">Restart app for theme change</string>
+
+    <!-- Rename session -->
+    <string name="btn_rename_session">Rename</string>
+    <string name="rename_session_dialog_title">Rename conversation</string>
+    <string name="rename_session_hint">Enter a title</string>
+    <string name="session_renamed">Conversation renamed</string>
 </resources>

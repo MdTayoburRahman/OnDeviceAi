@@ -10,6 +10,7 @@ public class ChatSession {
     private String firstMessage;
     private long timestamp;
     private int messageCount;
+    private String alias;
 
     public ChatSession(String sessionId, String firstMessage, long timestamp, int messageCount) {
         this.sessionId = sessionId;
@@ -50,10 +51,21 @@ public class ChatSession {
         this.messageCount = messageCount;
     }
 
+    public String getAlias() {
+        return alias;
+    }
+
+    public void setAlias(String alias) {
+        this.alias = alias;
+    }
+
     /**
-     * Get a preview of the first message (truncated if too long)
+     * Get a preview of the first message (truncated if too long), or alias if set.
      */
     public String getPreview() {
+        if (alias != null && !alias.trim().isEmpty()) {
+            return alias;
+        }
         if (firstMessage == null || firstMessage.isEmpty()) {
             return "Empty conversation";
         }
